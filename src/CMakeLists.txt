@@ -251,6 +251,36 @@ target_link_libraries(btc_net_transport
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
 )
 
+# Transitional transaction-relay boundary. Validation and net_processing still
+# consume these concrete types directly; keeping the implementation together in
+# one object target makes that dependency visible without changing behavior.
+add_library(btc_tx_relay OBJECT EXCLUDE_FROM_ALL
+  node/transaction.cpp
+  node/txdownloadman_impl.cpp
+  node/txorphanage.cpp
+  node/txreconciliation.cpp
+  policy/ephemeral_policy.cpp
+  policy/packages.cpp
+  policy/rbf.cpp
+  policy/truc_policy.cpp
+  private_broadcast.cpp
+  txgraph.cpp
+  txmempool.cpp
+  txrequest.cpp
+)
+target_link_libraries(btc_tx_relay
+  PRIVATE
+    core_interface
+    bitcoin_common
+    bitcoin_util
+    $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
+    leveldb
+    minisketch
+    univalue
+    $<TARGET_NAME_IF_EXISTS:Boost::headers>
+    $<TARGET_NAME_IF_EXISTS:USDT::headers>
+)
+
 # P2P, validation, chainstate, and compatibility composition used by `bitcoind`
 # and `bitcoin-qt` executables.
 add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
@@ -295,36 +325,25 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/minisketchwrapper.cpp
   node/peerman_args.cpp
   node/timeoffsets.cpp
-  node/transaction.cpp
-  node/txdownloadman_impl.cpp
-  node/txorphanage.cpp
-  node/txreconciliation.cpp
   node/utxo_snapshot.cpp
   node/warnings.cpp
   noui.cpp
-  policy/ephemeral_policy.cpp
-  policy/packages.cpp
-  policy/rbf.cpp
   policy/settings.cpp
-  policy/truc_policy.cpp
-  private_broadcast.cpp
   script/sigcache.cpp
   signet.cpp
   txdb.cpp
-  txgraph.cpp
-  txmempool.cpp
-  txrequest.cpp
   validation.cpp
   validationinterface.cpp
   versionbits.cpp
   $<$<TARGET_EXISTS:bitcoin_wallet>:wallet/init.cpp>
   $<$<NOT:$<TARGET_EXISTS:bitcoin_wallet>>:dummywallet.cpp>
 )
-add_dependencies(bitcoin_node btc_net_transport btc_node_optional)
+add_dependencies(bitcoin_node btc_net_transport btc_node_optional btc_tx_relay)
 target_link_libraries(bitcoin_node
   PRIVATE
     btc_net_transport
     btc_node_optional
+    btc_tx_relay
     core_interface
     bitcoin_common
     bitcoin_util
