@@ -79,3 +79,19 @@
 - 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
 
 阶段 3 仍未完成。下一切片继续迁移地址中继或 headers-sync 专用锁域。
+
+## 5. 第五切片：getdata 请求队列锁域
+
+将每个 peer 的 `getdata` 工作队列及互斥量移入 `PeerSession`。会话模块提供 `WithGetDataRequests` 和只读 `HasGetDataRequests`；`ProcessGetData` 显式接收只能在锁内获得的队列引用，调用点不再直接访问互斥量或内部队列。
+
+原处理次序保持不变：普通 GETDATA 仍在同一锁域内完成批量入队和立即处理；交易请求仍优先批处理，每轮最多处理一个区块请求；未知类型仍从队首移除以避免 CPU 空转；send buffer backpressure、NOTFOUND 和中断语义均未改变。专项测试覆盖空队列、入队、锁内读取/清空和清空后状态。
+
+本切片验证结果：
+
+- 最小 `bitcoind.exe`、`test_bitcoin.exe`、`fuzz.exe` 均重新编译并链接成功；
+- `peer_session`、DoS、net、peer connection 和 peerman 定向 27 项通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 持久化、干净重启和强制终止恢复通过；
+- V1/V2 协商、101 块同步、103 高度重组和交易中继通过；
+- 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
+
+阶段 3 仍未完成。下一步继续收敛剩余会话锁域，然后提取 headers/block 下载调度状态。

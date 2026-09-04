@@ -57,6 +57,18 @@ BOOST_AUTO_TEST_CASE(immutable_identity)
         BOOST_CHECK(announcements.m_continuation_block == uint256::ONE);
     });
 
+    BOOST_CHECK(!outbound.HasGetDataRequests());
+    outbound.WithGetDataRequests([](auto& requests) {
+        requests.emplace_back(MSG_BLOCK, uint256::ONE);
+    });
+    BOOST_CHECK(outbound.HasGetDataRequests());
+    outbound.WithGetDataRequests([](auto& requests) {
+        BOOST_REQUIRE_EQUAL(requests.size(), 1U);
+        BOOST_CHECK(requests.front().hash == uint256::ONE);
+        requests.clear();
+    });
+    BOOST_CHECK(!outbound.HasGetDataRequests());
+
     const node::PeerSession inbound{id + 1, NODE_NONE, /*is_inbound=*/true};
     BOOST_CHECK_EQUAL(inbound.m_id, id + 1);
     BOOST_CHECK(inbound.m_our_services == NODE_NONE);

@@ -317,11 +317,6 @@ struct Peer : node::PeerSession {
     /** Whether we've sent this peer a getheaders in response to an inv prior to initial-headers-sync completing */
     bool m_inv_triggered_getheaders_before_sync GUARDED_BY(NetEventsInterface::g_msgproc_mutex){false};
 
-    /** Protects m_getdata_requests **/
-    Mutex m_getdata_requests_mutex;
-    /** Work queue of items requested by this peer **/
-    std::deque<CInv> m_getdata_requests GUARDED_BY(m_getdata_requests_mutex);
-
     /** Time of the last getheaders message to this peer */
     NodeClock::time_point m_last_getheaders_timestamp GUARDED_BY(NetEventsInterface::g_msgproc_mutex){};
 
@@ -969,8 +964,9 @@ private:
     CTransactionRef FindTxForGetData(const Peer::TxRelay& tx_relay, const GenTxid& gtxid)
         EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex, !tx_relay.m_tx_inventory_mutex);
 
-    void ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic<bool>& interruptMsgProc)
-        EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex, peer.m_getdata_requests_mutex, NetEventsInterface::g_msgproc_mutex)
+    void ProcessGetData(CNode& pfrom, Peer& peer, std::deque<CInv>& requests,
+                        const std::atomic<bool>& interruptMsgProc)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_most_recent_block_mutex, NetEventsInterface::g_msgproc_mutex)
         LOCKS_EXCLUDED(::cs_main);
 
     /** Process a new block. Perform any post-processing housekeeping */
@@ -2683,19 +2679,20 @@ CTransactionRef PeerManagerImpl::FindTxForGetData(const Peer::TxRelay& tx_relay,
     return {};
 }
 
-void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic<bool>& interruptMsgProc)
+void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, std::deque<CInv>& requests,
+                                     const std::atomic<bool>& interruptMsgProc)
 {
     AssertLockNotHeld(cs_main);
 
     auto tx_relay = peer.GetTxRelay();
 
-    std::deque<CInv>::iterator it = peer.m_getdata_requests.begin();
+    std::deque<CInv>::iterator it = requests.begin();
     std::vector<CInv> vNotFound;
 
     // Process as many TX items from the front of the getdata queue as
     // possible, since they're common and it's efficient to batch process
     // them.
-    while (it != peer.m_getdata_requests.end() && it->IsGenTxMsg()) {
+    while (it != requests.end() && it->IsGenTxMsg()) {
         if (interruptMsgProc) return;
         // The send buffer provides backpressure. If there's no space in
         // the buffer, pause processing until the next call.
@@ -2721,7 +2718,7 @@ void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic
 
     // Only process one BLOCK item per call, since they're uncommon and can be
     // expensive to process.
-    if (it != peer.m_getdata_requests.end() && !pfrom.fPauseSend) {
+    if (it != requests.end() && !pfrom.fPauseSend) {
         const CInv &inv = *it++;
         if (inv.IsGenBlkMsg()) {
             ProcessGetBlockData(pfrom, peer, inv);
@@ -2733,7 +2730,7 @@ void PeerManagerImpl::ProcessGetData(CNode& pfrom, Peer& peer, const std::atomic
         // https://bitcoincore.org/en/2024/07/03/disclose-getdata-cpu.
     }
 
-    peer.m_getdata_requests.erase(peer.m_getdata_requests.begin(), it);
+    requests.erase(requests.begin(), it);
 
     if (!vNotFound.empty()) {
         // Let the peer know that we didn't find what it asked for, so it doesn't
@@ -4401,11 +4398,10 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             return;
         }
 
-        {
-            LOCK(peer.m_getdata_requests_mutex);
-            peer.m_getdata_requests.insert(peer.m_getdata_requests.end(), vInv.begin(), vInv.end());
-            ProcessGetData(pfrom, peer, interruptMsgProc);
-        }
+        peer.WithGetDataRequests([&](auto& requests) {
+            requests.insert(requests.end(), vInv.begin(), vInv.end());
+            ProcessGetData(pfrom, peer, requests, interruptMsgProc);
+        });
 
         return;
     }
@@ -4544,7 +4540,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         // actually receive all the data read from disk over the network.
         LogDebug(BCLog::NET, "Peer %d sent us a getblocktxn for a block > %i deep\n", pfrom.GetId(), MAX_BLOCKTXN_DEPTH);
         CInv inv{MSG_WITNESS_BLOCK, req.blockhash};
-        WITH_LOCK(peer.m_getdata_requests_mutex, peer.m_getdata_requests.push_back(inv));
+        peer.WithGetDataRequests([&](auto& requests) { requests.push_back(inv); });
         // The message processing loop will go around again (without pausing) and we'll respond then
         return;
     }
@@ -5346,12 +5342,9 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
     // has been sent first before processing any incoming messages
     if (!node.IsInboundConn() && !peer.m_outbound_version_message_sent) return false;
 
-    {
-        LOCK(peer.m_getdata_requests_mutex);
-        if (!peer.m_getdata_requests.empty()) {
-            ProcessGetData(node, peer, interruptMsgProc);
-        }
-    }
+    peer.WithGetDataRequests([&](auto& requests) {
+        if (!requests.empty()) ProcessGetData(node, peer, requests, interruptMsgProc);
+    });
 
     const bool processed_orphan = ProcessOrphanTx(peer);
 
@@ -5362,10 +5355,7 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
 
     // this maintains the order of responses
     // and prevents m_getdata_requests to grow unbounded
-    {
-        LOCK(peer.m_getdata_requests_mutex);
-        if (!peer.m_getdata_requests.empty()) return true;
-    }
+    if (peer.HasGetDataRequests()) return true;
 
     // Don't bother if send buffer is too full to respond anyway
     if (node.fPauseSend) return false;
@@ -5395,10 +5385,7 @@ bool PeerManagerImpl::ProcessMessages(CNode& node, std::atomic<bool>& interruptM
     try {
         ProcessMessage(peer, node, msg.m_type, msg.m_recv, msg.m_time, interruptMsgProc);
         if (interruptMsgProc) return false;
-        {
-            LOCK(peer.m_getdata_requests_mutex);
-            if (!peer.m_getdata_requests.empty()) fMoreWork = true;
-        }
+        if (peer.HasGetDataRequests()) fMoreWork = true;
         // Does this peer have an orphan ready to reconsider?
         // (Note: we may have provided a parent for an orphan provided
         //  by another peer that was already processed; in that case,

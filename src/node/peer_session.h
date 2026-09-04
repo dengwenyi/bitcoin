@@ -13,6 +13,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <vector>
 
 namespace node {
@@ -74,12 +75,25 @@ struct PeerSession {
         callback(m_block_announcements);
     }
 
+    /** Run one operation while holding the getdata request lock. */
+    template <typename Callable>
+    void WithGetDataRequests(Callable&& callback)
+    {
+        LOCK(m_getdata_requests_mutex);
+        callback(m_getdata_requests);
+    }
+
+    bool HasGetDataRequests() const;
+
 private:
     Mutex m_misbehavior_mutex;
     bool m_should_discourage GUARDED_BY(m_misbehavior_mutex){false};
 
     Mutex m_block_inv_mutex;
     BlockAnnouncements m_block_announcements GUARDED_BY(m_block_inv_mutex);
+
+    mutable Mutex m_getdata_requests_mutex;
+    std::deque<CInv> m_getdata_requests GUARDED_BY(m_getdata_requests_mutex);
 };
 
 } // namespace node
