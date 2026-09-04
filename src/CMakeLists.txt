@@ -392,6 +392,35 @@ target_link_libraries(bitcoin_node
     $<TARGET_NAME_IF_EXISTS:Boost::headers>
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
 )
+
+# Keep lower layers from acquiring declared links back to higher layers. These
+# checks intentionally cover target-level dependencies; source-level coupling is
+# removed incrementally by the facade and channel stages.
+function(assert_target_does_not_link target)
+  get_target_property(target_links ${target} LINK_LIBRARIES)
+  foreach(forbidden_target IN LISTS ARGN)
+    list(FIND target_links "${forbidden_target}" forbidden_index)
+    if(NOT forbidden_index EQUAL -1)
+      message(FATAL_ERROR
+        "Layering violation: ${target} must not link ${forbidden_target}"
+      )
+    endif()
+  endforeach()
+endfunction()
+
+assert_target_does_not_link(btc_net_transport
+  btc_chainstate btc_node_optional btc_peer_protocol btc_tx_relay
+)
+assert_target_does_not_link(btc_chainstate
+  btc_net_transport btc_node_optional btc_peer_protocol btc_tx_relay
+)
+assert_target_does_not_link(btc_tx_relay
+  btc_chainstate btc_net_transport btc_node_optional btc_peer_protocol
+)
+assert_target_does_not_link(btc_peer_protocol
+  btc_chainstate btc_node_optional btc_tx_relay
+)
+
 if(WITH_EMBEDDED_ASMAP)
   target_compile_definitions(bitcoin_node PRIVATE ENABLE_EMBEDDED_ASMAP=1)
   target_compile_definitions(btc_node_optional PRIVATE ENABLE_EMBEDDED_ASMAP=1)
