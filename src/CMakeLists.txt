@@ -296,6 +296,7 @@ add_library(btc_peer_protocol OBJECT EXCLUDE_FROM_ALL
   node/eviction.cpp
   node/minisketchwrapper.cpp
   node/peerman_args.cpp
+  node/peer_session.cpp
   node/timeoffsets.cpp
 )
 target_link_libraries(btc_peer_protocol

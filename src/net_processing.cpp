@@ -33,6 +33,7 @@
 #include <node/blockstorage.h>
 #include <node/chainstate_facade.h>
 #include <node/connection_types.h>
+#include <node/peer_session.h>
 #include <node/protocol_version.h>
 #include <node/timeoffsets.h>
 #include <node/txdownloadman.h>
@@ -228,29 +229,9 @@ struct QueuedBlock {
  * TODO: move most members from CNodeState to this structure.
  * TODO: move remaining application-layer data members from CNode to this structure.
  */
-struct Peer {
-    /** Same id as the CNode object for this peer */
-    const NodeId m_id{0};
-
-    /** Services we offered to this peer.
-     *
-     *  This is supplied by CConnman during peer initialization. It's const
-     *  because there is no protocol defined for renegotiating services
-     *  initially offered to a peer. The set of local services we offer should
-     *  not change after initialization.
-     *
-     *  An interesting example of this is NODE_NETWORK and initial block
-     *  download: a node which starts up from scratch doesn't have any blocks
-     *  to serve, but still advertises NODE_NETWORK because it will eventually
-     *  fulfill this role after IBD completes. P2P code is written in such a
-     *  way that it can gracefully handle peers who don't make good on their
-     *  service advertisements. */
-    const ServiceFlags m_our_services;
+struct Peer : node::PeerSession {
     /** Services this peer offered to us. */
     std::atomic<ServiceFlags> m_their_services{NODE_NONE};
-
-    //! Whether this peer is an inbound connection
-    const bool m_is_inbound;
 
     /** Protects misbehavior data members */
     Mutex m_misbehavior_mutex;
@@ -420,9 +401,7 @@ struct Peer {
     std::atomic<std::chrono::seconds> m_time_offset{0s};
 
     explicit Peer(NodeId id, ServiceFlags our_services, bool is_inbound)
-        : m_id{id}
-        , m_our_services{our_services}
-        , m_is_inbound{is_inbound}
+        : PeerSession{id, our_services, is_inbound}
     {}
 
 private:
