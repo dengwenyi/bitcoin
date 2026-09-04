@@ -18,7 +18,10 @@ def main() -> int:
     # such an environment to child processes. Canonicalizing all names removes
     # the duplicate without changing values or the parent process.
     environment = {name.upper(): value for name, value in os.environ.items()}
-    return subprocess.call(sys.argv[1:], env=environment)
+    path_prepend = environment.pop("CODEX_CLEAN_PATH_PREPEND", "")
+    if path_prepend:
+        environment["PATH"] = path_prepend + os.pathsep + environment.get("PATH", "")
+    return subprocess.call(sys.argv[1:], env=environment, stdin=subprocess.PIPE)
 
 
 if __name__ == "__main__":

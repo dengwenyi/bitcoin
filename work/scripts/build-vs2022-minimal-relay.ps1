@@ -1,7 +1,8 @@
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Debug',
-    [string]$BuildDirectory = 'build-node-relay-vs2022'
+    [string]$BuildDirectory = 'build-node-relay-vs2022',
+    [string]$Target
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,14 +26,16 @@ foreach ($requiredPath in @($msbuild, $solution)) {
 # copying the environment to CL.exe. Normalize the child environment only; do
 # not change the user's process or persistent configuration.
 $cleanEnvRunner = Join-Path $PSScriptRoot 'run-with-clean-windows-env.py'
+$targetArgument = if ($Target) { "/t:$Target" } else { '/t:Build' }
 Set-Location -LiteralPath $repoRoot
-& python $cleanEnvRunner $msbuild $solution /m:1 "/p:Configuration=$Configuration" /p:Platform=x64 /v:minimal /nologo
+& python $cleanEnvRunner $msbuild $solution $targetArgument /m:1 "/p:Configuration=$Configuration" /p:Platform=x64 /v:minimal /nologo
 if ($LASTEXITCODE -ne 0) {
     throw "MSBuild failed with exit code $LASTEXITCODE"
 }
 
-$binary = Join-Path (Join-Path (Join-Path $repoRoot $BuildDirectory) 'bin') "$Configuration\bitcoind.exe"
+$artifactName = if ($Target) { "$Target.exe" } else { 'bitcoind.exe' }
+$binary = Join-Path (Join-Path (Join-Path $repoRoot $BuildDirectory) 'bin') "$Configuration\$artifactName"
 if (-not (Test-Path -LiteralPath $binary)) {
-    throw "Expected daemon was not produced: $binary"
+    throw "Expected build artifact was not produced: $binary"
 }
 Write-Host "Built $binary"

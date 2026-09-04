@@ -1,7 +1,8 @@
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Debug',
-    [string]$BuildDirectory = 'build-node-relay-vs2022'
+    [string]$BuildDirectory = 'build-node-relay-vs2022',
+    [switch]$BuildTests
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,18 +34,32 @@ $env:VCPKG_ROOT = $vcpkgRoot
 $env:VCPKG_DOWNLOADS = Join-Path $cacheRoot 'vcpkg-downloads'
 $env:X_VCPKG_REGISTRIES_CACHE = Join-Path $cacheRoot 'vcpkg-registries-vs2022'
 $env:VCPKG_DEFAULT_BINARY_CACHE = Join-Path $cacheRoot 'vcpkg-bincache'
-$env:VCPKG_FORCE_SYSTEM_BINARIES = $null
 $env:GIT_CONFIG_COUNT = '1'
 $env:GIT_CONFIG_KEY_0 = 'http.version'
 $env:GIT_CONFIG_VALUE_0 = 'HTTP/1.1'
+$manifestFeatures = if ($BuildTests) { 'tests' } else { '' }
+$buildTestsValue = if ($BuildTests) { 'ON' } else { 'OFF' }
 
 New-Item -ItemType Directory -Force -Path `
     $env:VCPKG_DOWNLOADS, `
     $env:X_VCPKG_REGISTRIES_CACHE, `
     $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
 
+$cleanPath = @(Split-Path -Parent $cmake)
+$cachedPwsh = Get-ChildItem -Path (Join-Path $env:VCPKG_DOWNLOADS 'tools\powershell-core-*-windows\pwsh.exe') -ErrorAction SilentlyContinue |
+    Sort-Object FullName -Descending |
+    Select-Object -First 1
+if ($cachedPwsh) {
+    $cleanPath += $cachedPwsh.DirectoryName
+    $env:VCPKG_FORCE_SYSTEM_BINARIES = '1'
+} else {
+    $env:VCPKG_FORCE_SYSTEM_BINARIES = $null
+}
+$env:CODEX_CLEAN_PATH_PREPEND = $cleanPath -join [IO.Path]::PathSeparator
+
 Set-Location -LiteralPath $repoRoot
-& $cmake `
+$cleanEnvRunner = Join-Path $PSScriptRoot 'run-with-clean-windows-env.py'
+& python $cleanEnvRunner $cmake `
     -S . `
     -B $buildDir `
     -G 'Visual Studio 17 2022' `
@@ -53,12 +68,12 @@ Set-Location -LiteralPath $repoRoot
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
     -DVCPKG_TARGET_TRIPLET=x64-windows `
     -DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON `
-    '-DVCPKG_MANIFEST_FEATURES=' `
+    "-DVCPKG_MANIFEST_FEATURES=$manifestFeatures" `
     -DBUILD_BITCOIN_BIN=OFF `
     -DBUILD_DAEMON=ON `
     -DBUILD_GUI=OFF `
     -DBUILD_CLI=OFF `
-    -DBUILD_TESTS=OFF `
+    "-DBUILD_TESTS=$buildTestsValue" `
     -DBUILD_TX=OFF `
     -DBUILD_UTIL=OFF `
     -DBUILD_UTIL_CHAINSTATE=OFF `
