@@ -311,15 +311,15 @@ target_link_libraries(btc_peer_protocol
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
 )
 
-# P2P, validation, chainstate, and compatibility composition used by `bitcoind`
-# and `bitcoin-qt` executables.
-add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
+# Transitional chainstate boundary. It preserves the current validation,
+# persistence, reorg, and notification implementation while making the core
+# chain dependency explicit for the later validation facade.
+add_library(btc_chainstate OBJECT EXCLUDE_FROM_ALL
   blockfilter.cpp
   consensus/tx_verify.cpp
   dbwrapper.cpp
   deploymentstatus.cpp
   flatfile.cpp
-  init.cpp
   kernel/chain.cpp
   kernel/checks.cpp
   kernel/coinstats.cpp
@@ -327,38 +327,57 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   kernel/cs_main.cpp
   kernel/disconnected_transactions.cpp
   kernel/mempool_removal_reason.cpp
-  node/abort.cpp
-  node/blockmanager_args.cpp
   node/blockstorage.cpp
-  node/caches.cpp
   node/chainstate.cpp
-  node/chainstatemanager_args.cpp
   node/coin.cpp
-  node/coins_view_args.cpp
-  node/context.cpp
-  node/database_args.cpp
-  node/interface_ui.cpp
-  node/interfaces.cpp
   node/kernel_notifications.cpp
-  node/mempool_args.cpp
-  node/mempool_persist.cpp
-  node/mempool_persist_args.cpp
   node/utxo_snapshot.cpp
-  node/warnings.cpp
-  noui.cpp
-  policy/settings.cpp
   script/sigcache.cpp
   signet.cpp
   txdb.cpp
   validation.cpp
   validationinterface.cpp
   versionbits.cpp
+)
+target_link_libraries(btc_chainstate
+  PRIVATE
+    core_interface
+    bitcoin_common
+    bitcoin_util
+    $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
+    leveldb
+    minisketch
+    univalue
+    $<TARGET_NAME_IF_EXISTS:Boost::headers>
+    $<TARGET_NAME_IF_EXISTS:USDT::headers>
+)
+
+# P2P, validation, chainstate, and compatibility composition used by `bitcoind`
+# and `bitcoin-qt` executables.
+add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
+  init.cpp
+  node/abort.cpp
+  node/blockmanager_args.cpp
+  node/caches.cpp
+  node/chainstatemanager_args.cpp
+  node/coins_view_args.cpp
+  node/context.cpp
+  node/database_args.cpp
+  node/interface_ui.cpp
+  node/interfaces.cpp
+  node/mempool_args.cpp
+  node/mempool_persist.cpp
+  node/mempool_persist_args.cpp
+  node/warnings.cpp
+  noui.cpp
+  policy/settings.cpp
   $<$<TARGET_EXISTS:bitcoin_wallet>:wallet/init.cpp>
   $<$<NOT:$<TARGET_EXISTS:bitcoin_wallet>>:dummywallet.cpp>
 )
-add_dependencies(bitcoin_node btc_net_transport btc_node_optional btc_peer_protocol btc_tx_relay)
+add_dependencies(bitcoin_node btc_chainstate btc_net_transport btc_node_optional btc_peer_protocol btc_tx_relay)
 target_link_libraries(bitcoin_node
   PRIVATE
+    btc_chainstate
     btc_net_transport
     btc_node_optional
     btc_peer_protocol
@@ -375,6 +394,7 @@ target_link_libraries(bitcoin_node
 )
 if(WITH_EMBEDDED_ASMAP)
   target_compile_definitions(bitcoin_node PRIVATE ENABLE_EMBEDDED_ASMAP=1)
+  target_compile_definitions(btc_node_optional PRIVATE ENABLE_EMBEDDED_ASMAP=1)
   include(TargetDataSources)
   target_raw_data_sources(bitcoin_node NAMESPACE node::data
     node/data/ip_asn.dat
