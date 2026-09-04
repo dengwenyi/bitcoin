@@ -12,11 +12,31 @@ BOOST_AUTO_TEST_CASE(immutable_identity)
 {
     constexpr NodeId id{42};
     constexpr ServiceFlags services{NODE_NETWORK | NODE_WITNESS};
-    const node::PeerSession outbound{id, services, /*is_inbound=*/false};
+    node::PeerSession outbound{id, services, /*is_inbound=*/false};
 
     BOOST_CHECK_EQUAL(outbound.m_id, id);
     BOOST_CHECK(outbound.m_our_services == services);
     BOOST_CHECK(!outbound.m_is_inbound);
+    BOOST_CHECK(outbound.m_their_services == NODE_NONE);
+    BOOST_CHECK_EQUAL(outbound.m_ping_nonce_sent.load(), 0U);
+    BOOST_CHECK(outbound.m_ping_start.load() == NodeClock::epoch);
+    BOOST_CHECK(!outbound.m_ping_queued.load());
+    BOOST_CHECK(!outbound.m_wtxid_relay.load());
+    BOOST_CHECK(!outbound.m_addr_relay_enabled.load());
+    BOOST_CHECK(!outbound.m_wants_addrv2.load());
+    BOOST_CHECK(!outbound.m_sent_sendheaders.load());
+    BOOST_CHECK_EQUAL(outbound.m_addr_rate_limited.load(), 0U);
+    BOOST_CHECK_EQUAL(outbound.m_addr_processed.load(), 0U);
+    BOOST_CHECK(outbound.m_time_offset.load() == std::chrono::seconds{0});
+
+    outbound.m_their_services = NODE_NETWORK_LIMITED;
+    outbound.m_ping_queued = true;
+    outbound.m_wtxid_relay = true;
+    outbound.m_time_offset = std::chrono::seconds{7};
+    BOOST_CHECK(outbound.m_their_services.load() == NODE_NETWORK_LIMITED);
+    BOOST_CHECK(outbound.m_ping_queued.load());
+    BOOST_CHECK(outbound.m_wtxid_relay.load());
+    BOOST_CHECK(outbound.m_time_offset.load() == std::chrono::seconds{7});
 
     const node::PeerSession inbound{id + 1, NODE_NONE, /*is_inbound=*/true};
     BOOST_CHECK_EQUAL(inbound.m_id, id + 1);

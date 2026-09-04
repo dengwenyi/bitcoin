@@ -30,3 +30,17 @@
 ### 1.4 状态
 
 本切片仅建立独立会话模块和最小身份契约，阶段 3 尚未完成。下一步将按锁域迁移可变 Peer 会话状态，再提取 `CNodeState` 中的 headers/block 下载调度状态。
+
+## 2. 第二切片：原子会话状态
+
+`PeerSession` 继续接收无需 `g_msgproc_mutex` 或其他外部互斥量即可访问的原子状态：对端服务位、ping nonce/起始时间/显式请求、wtxid relay、地址中继与 ADDRv2 能力、sendheaders 状态、地址处理计数和 VERSION 时钟偏移。原字段类型、初始值及原子读写方式保持不变；带锁的 bloom filter、发送队列、计时器和 headers sync 对象仍留在 `Peer`，避免跨锁域一次性迁移。
+
+专项测试新增全部默认值断言，并验证对端服务位、ping 请求、wtxid relay 和时钟偏移可以独立更新。改造后的结果：
+
+- 最小 `bitcoind.exe`、`test_bitcoin.exe`、`fuzz.exe` 均重新编译并链接成功；
+- 会话/headers/compact-block/连接与驱逐组合 45 项通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 持久化、干净重启和强制终止恢复通过；
+- V1/V2 协商、101 块同步、103 高度重组和交易中继通过；
+- 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
+
+阶段 3 仍未完成。下一切片继续处理按专用锁聚合的可变会话状态，保持一次只移动一个锁域。
