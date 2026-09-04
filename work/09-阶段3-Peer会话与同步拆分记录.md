@@ -63,3 +63,19 @@
 - 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
 
 阶段 3 仍未完成。下一切片迁移区块公告锁域，继续减少 `PeerManagerImpl` 对会话内部容器的直接访问。
+
+## 4. 第四切片：区块公告锁域
+
+区块 `inv` 队列、headers 公告队列、continuation hash 及其互斥量已移入 `PeerSession::BlockAnnouncements`。`PeerManagerImpl` 只能通过 `WithBlockAnnouncements` 执行一个不返回内部引用的闭包，不能直接取得互斥量或在解锁后持有内部容器引用。
+
+原有关键时序保持不变：tip hash 仍按 reverse 顺序入 headers 队列；getblocks continuation 仍在匹配请求后立即发送并清空；headers/compact-block 尝试、inv 回退和队列清空仍处在同一个锁持有区间；块 inv 仍按原顺序分批发送。专项测试覆盖三个容器的默认状态、同一锁域内写入以及下一次锁域访问时的持久可见性。
+
+本切片验证结果：
+
+- 最小 `bitcoind.exe`、`test_bitcoin.exe`、`fuzz.exe` 均重新编译并链接成功；
+- `peer_session`、compact block、headers sync、peer connection、peer eviction 和 peerman 定向 17 项通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 持久化、干净重启和强制终止恢复通过；
+- V1/V2 协商、101 块同步、103 高度重组和交易中继通过；
+- 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
+
+阶段 3 仍未完成。下一切片继续迁移地址中继或 headers-sync 专用锁域。

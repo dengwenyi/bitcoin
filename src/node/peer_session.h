@@ -8,15 +8,26 @@
 #include <node/eviction.h>
 #include <protocol.h>
 #include <sync.h>
+#include <uint256.h>
 
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <vector>
 
 namespace node {
 
 /** Identity and independently synchronized state for one P2P peer session. */
 struct PeerSession {
+    struct BlockAnnouncements {
+        /** Blocks queued for immediate inv relay, in send order. */
+        std::vector<uint256> m_blocks_for_inv_relay;
+        /** Blocks preferred for headers relay, with inv fallback. */
+        std::vector<uint256> m_blocks_for_headers_relay;
+        /** Last inventory hash whose request should trigger the next batch. */
+        uint256 m_continuation_block;
+    };
+
     /** Same id as the CNode object for this peer. */
     const NodeId m_id;
 
@@ -55,9 +66,20 @@ struct PeerSession {
     /** Consume a pending discouragement decision exactly once. */
     bool ConsumeShouldDiscourage();
 
+    /** Run one operation while holding the block-announcement lock. */
+    template <typename Callable>
+    void WithBlockAnnouncements(Callable&& callback)
+    {
+        LOCK(m_block_inv_mutex);
+        callback(m_block_announcements);
+    }
+
 private:
     Mutex m_misbehavior_mutex;
     bool m_should_discourage GUARDED_BY(m_misbehavior_mutex){false};
+
+    Mutex m_block_inv_mutex;
+    BlockAnnouncements m_block_announcements GUARDED_BY(m_block_inv_mutex);
 };
 
 } // namespace node

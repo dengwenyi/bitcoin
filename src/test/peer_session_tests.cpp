@@ -43,6 +43,20 @@ BOOST_AUTO_TEST_CASE(immutable_identity)
     BOOST_CHECK(outbound.ConsumeShouldDiscourage());
     BOOST_CHECK(!outbound.ConsumeShouldDiscourage());
 
+    outbound.WithBlockAnnouncements([](auto& announcements) {
+        BOOST_CHECK(announcements.m_blocks_for_inv_relay.empty());
+        BOOST_CHECK(announcements.m_blocks_for_headers_relay.empty());
+        BOOST_CHECK(announcements.m_continuation_block.IsNull());
+        announcements.m_blocks_for_inv_relay.push_back(uint256::ONE);
+        announcements.m_blocks_for_headers_relay.push_back(uint256::ONE);
+        announcements.m_continuation_block = uint256::ONE;
+    });
+    outbound.WithBlockAnnouncements([](auto& announcements) {
+        BOOST_CHECK_EQUAL(announcements.m_blocks_for_inv_relay.size(), 1U);
+        BOOST_CHECK_EQUAL(announcements.m_blocks_for_headers_relay.size(), 1U);
+        BOOST_CHECK(announcements.m_continuation_block == uint256::ONE);
+    });
+
     const node::PeerSession inbound{id + 1, NODE_NONE, /*is_inbound=*/true};
     BOOST_CHECK_EQUAL(inbound.m_id, id + 1);
     BOOST_CHECK(inbound.m_our_services == NODE_NONE);
