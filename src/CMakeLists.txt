@@ -328,6 +328,7 @@ add_library(btc_chainstate OBJECT EXCLUDE_FROM_ALL
   kernel/disconnected_transactions.cpp
   kernel/mempool_removal_reason.cpp
   node/blockstorage.cpp
+  node/chainstate_facade.cpp
   node/chainstate.cpp
   node/coin.cpp
   node/kernel_notifications.cpp
