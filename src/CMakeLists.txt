@@ -180,7 +180,55 @@ if(ENABLE_WALLET)
 endif()
 
 
-# P2P and RPC server functionality used by `bitcoind` and `bitcoin-qt` executables.
+# Transitional boundary for upper-level services that are not required by the
+# eventual minimal relay node. Keep these objects linked into bitcoin_node until
+# the composition root has narrow ports for every remaining caller.
+add_library(btc_node_optional OBJECT EXCLUDE_FROM_ALL
+  httprpc.cpp
+  httpserver.cpp
+  index/base.cpp
+  index/blockfilterindex.cpp
+  index/coinstatsindex.cpp
+  index/txindex.cpp
+  index/txospenderindex.cpp
+  node/miner.cpp
+  node/mining_args.cpp
+  node/mini_miner.cpp
+  node/psbt.cpp
+  policy/fees/block_policy_estimator.cpp
+  policy/fees/estimator_args.cpp
+  policy/fees/estimator_man.cpp
+  policy/fees/mempool_estimator.cpp
+  rest.cpp
+  rpc/blockchain.cpp
+  rpc/external_signer.cpp
+  rpc/fees.cpp
+  rpc/mempool.cpp
+  rpc/mining.cpp
+  rpc/net.cpp
+  rpc/node.cpp
+  rpc/output_script.cpp
+  rpc/rawtransaction.cpp
+  rpc/server.cpp
+  rpc/server_util.cpp
+  rpc/signmessage.cpp
+  rpc/txoutproof.cpp
+)
+target_link_libraries(btc_node_optional
+  PRIVATE
+    core_interface
+    bitcoin_common
+    bitcoin_util
+    $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
+    leveldb
+    minisketch
+    univalue
+    $<TARGET_NAME_IF_EXISTS:Boost::headers>
+    $<TARGET_NAME_IF_EXISTS:USDT::headers>
+)
+
+# P2P, validation, chainstate, and compatibility composition used by `bitcoind`
+# and `bitcoin-qt` executables.
 add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   addrdb.cpp
   addrman.cpp
@@ -193,14 +241,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   deploymentstatus.cpp
   flatfile.cpp
   headerssync.cpp
-  httprpc.cpp
-  httpserver.cpp
   i2p.cpp
-  index/base.cpp
-  index/blockfilterindex.cpp
-  index/coinstatsindex.cpp
-  index/txindex.cpp
-  index/txospenderindex.cpp
   init.cpp
   kernel/chain.cpp
   kernel/checks.cpp
@@ -231,12 +272,8 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/mempool_args.cpp
   node/mempool_persist.cpp
   node/mempool_persist_args.cpp
-  node/miner.cpp
-  node/mining_args.cpp
-  node/mini_miner.cpp
   node/minisketchwrapper.cpp
   node/peerman_args.cpp
-  node/psbt.cpp
   node/timeoffsets.cpp
   node/transaction.cpp
   node/txdownloadman_impl.cpp
@@ -246,29 +283,11 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/warnings.cpp
   noui.cpp
   policy/ephemeral_policy.cpp
-  policy/fees/block_policy_estimator.cpp
-  policy/fees/estimator_args.cpp
-  policy/fees/estimator_man.cpp
-  policy/fees/mempool_estimator.cpp
   policy/packages.cpp
   policy/rbf.cpp
   policy/settings.cpp
   policy/truc_policy.cpp
   private_broadcast.cpp
-  rest.cpp
-  rpc/blockchain.cpp
-  rpc/external_signer.cpp
-  rpc/fees.cpp
-  rpc/mempool.cpp
-  rpc/mining.cpp
-  rpc/net.cpp
-  rpc/node.cpp
-  rpc/output_script.cpp
-  rpc/rawtransaction.cpp
-  rpc/server.cpp
-  rpc/server_util.cpp
-  rpc/signmessage.cpp
-  rpc/txoutproof.cpp
   script/sigcache.cpp
   signet.cpp
   torcontrol.cpp
@@ -282,8 +301,10 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   $<$<TARGET_EXISTS:bitcoin_wallet>:wallet/init.cpp>
   $<$<NOT:$<TARGET_EXISTS:bitcoin_wallet>>:dummywallet.cpp>
 )
+add_dependencies(bitcoin_node btc_node_optional)
 target_link_libraries(bitcoin_node
   PRIVATE
+    btc_node_optional
     core_interface
     bitcoin_common
     bitcoin_util
