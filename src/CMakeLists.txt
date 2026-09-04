@@ -227,13 +227,36 @@ target_link_libraries(btc_node_optional
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
 )
 
+# Transitional network/transport boundary. V1Transport and V2Transport are
+# still implemented alongside CConnman in net.cpp, so this target deliberately
+# keeps the current implementation intact while giving it an explicit build
+# boundary for the later channel extraction.
+add_library(btc_net_transport OBJECT EXCLUDE_FROM_ALL
+  bip324.cpp
+  i2p.cpp
+  mapport.cpp
+  net.cpp
+  torcontrol.cpp
+)
+target_link_libraries(btc_net_transport
+  PRIVATE
+    core_interface
+    bitcoin_common
+    bitcoin_util
+    $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
+    leveldb
+    minisketch
+    univalue
+    $<TARGET_NAME_IF_EXISTS:Boost::headers>
+    $<TARGET_NAME_IF_EXISTS:USDT::headers>
+)
+
 # P2P, validation, chainstate, and compatibility composition used by `bitcoind`
 # and `bitcoin-qt` executables.
 add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   addrdb.cpp
   addrman.cpp
   banman.cpp
-  bip324.cpp
   blockencodings.cpp
   blockfilter.cpp
   consensus/tx_verify.cpp
@@ -241,7 +264,6 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   deploymentstatus.cpp
   flatfile.cpp
   headerssync.cpp
-  i2p.cpp
   init.cpp
   kernel/chain.cpp
   kernel/checks.cpp
@@ -250,8 +272,6 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   kernel/cs_main.cpp
   kernel/disconnected_transactions.cpp
   kernel/mempool_removal_reason.cpp
-  mapport.cpp
-  net.cpp
   net_processing.cpp
   netgroup.cpp
   node/abort.cpp
@@ -290,7 +310,6 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   private_broadcast.cpp
   script/sigcache.cpp
   signet.cpp
-  torcontrol.cpp
   txdb.cpp
   txgraph.cpp
   txmempool.cpp
@@ -301,9 +320,10 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   $<$<TARGET_EXISTS:bitcoin_wallet>:wallet/init.cpp>
   $<$<NOT:$<TARGET_EXISTS:bitcoin_wallet>>:dummywallet.cpp>
 )
-add_dependencies(bitcoin_node btc_node_optional)
+add_dependencies(bitcoin_node btc_net_transport btc_node_optional)
 target_link_libraries(bitcoin_node
   PRIVATE
+    btc_net_transport
     btc_node_optional
     core_interface
     bitcoin_common
