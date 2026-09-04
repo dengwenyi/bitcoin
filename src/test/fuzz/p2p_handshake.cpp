@@ -52,12 +52,13 @@ FUZZ_TARGET(p2p_handshake, .init = ::initialize)
     node.addrman = std::make_unique<AddrMan>(
         *node.netgroupman, /*deterministic=*/true, /*consistency_check_ratio=*/0);
     node.peerman = PeerManager::make(connman, *node.addrman,
-                                     /*banman=*/nullptr, chainman,
+                                     /*banman=*/nullptr, chainman.GetParams(),
                                      *node.mempool, *node.warnings,
                                      PeerManager::Options{
                                          .reconcile_txs = true,
                                          .deterministic_rng = true,
-                                     });
+                                     }, node::MakeChainstateFacade(chainman),
+                                     node::MakeTxValidationFacade(chainman, *node.mempool));
     connman.SetMsgProc(node.peerman.get());
     connman.SetAddrman(*node.addrman);
 

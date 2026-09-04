@@ -1971,10 +1971,13 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     auto& kernel_notifications{*Assert(node.notifications)};
 
     assert(!node.peerman);
+    auto chainstate_facade{node::MakeChainstateFacade(chainman)};
+    auto tx_validation_facade{node::MakeTxValidationFacade(chainman, *node.mempool)};
     node.peerman = PeerManager::make(*node.connman, *node.addrman,
-                                     node.banman.get(), chainman,
+                                     node.banman.get(), chainman.GetParams(),
                                      *node.mempool, *node.warnings,
-                                     peerman_opts);
+                                     peerman_opts, std::move(chainstate_facade),
+                                     std::move(tx_validation_facade));
     validation_signals.RegisterValidationInterface(node.peerman.get());
 
     // ********************************************************* Step 8: start indexers

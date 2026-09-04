@@ -28,9 +28,9 @@
 
 class AddrMan;
 class CTxMemPool;
-class ChainstateManager;
 class BanMan;
 class CBlockIndex;
+class CChainParams;
 class CScheduler;
 class DataStream;
 class uint256;
@@ -114,10 +114,10 @@ public:
     };
 
     static std::unique_ptr<PeerManager> make(CConnman& connman, AddrMan& addrman,
-                                             BanMan* banman, ChainstateManager& chainman,
+                                             BanMan* banman, const CChainParams& chainparams,
                                              CTxMemPool& pool, node::Warnings& warnings, Options opts,
-                                             std::unique_ptr<node::ChainstateFacade> chainstate = {},
-                                             std::unique_ptr<node::TxValidationFacade> tx_validation = {});
+                                             std::unique_ptr<node::ChainstateFacade> chainstate,
+                                             std::unique_ptr<node::TxValidationFacade> tx_validation);
     virtual ~PeerManager() = default;
 
     /**

@@ -2,7 +2,8 @@ param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Debug',
     [string]$BuildDirectory = 'build-node-relay-vs2022',
-    [switch]$BuildTests
+    [switch]$BuildTests,
+    [switch]$BuildFuzz
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,8 +38,9 @@ $env:VCPKG_DEFAULT_BINARY_CACHE = Join-Path $cacheRoot 'vcpkg-bincache'
 $env:GIT_CONFIG_COUNT = '1'
 $env:GIT_CONFIG_KEY_0 = 'http.version'
 $env:GIT_CONFIG_VALUE_0 = 'HTTP/1.1'
-$manifestFeatures = if ($BuildTests) { 'tests' } else { '' }
+$manifestFeatures = if ($BuildTests -or $BuildFuzz) { 'tests' } else { '' }
 $buildTestsValue = if ($BuildTests) { 'ON' } else { 'OFF' }
+$buildFuzzValue = if ($BuildFuzz) { 'ON' } else { 'OFF' }
 
 New-Item -ItemType Directory -Force -Path `
     $env:VCPKG_DOWNLOADS, `
@@ -82,7 +84,7 @@ $cleanEnvRunner = Join-Path $PSScriptRoot 'run-with-clean-windows-env.py'
     -DBUILD_WALLET_TOOL=OFF `
     -DBUILD_GUI_TESTS=OFF `
     -DBUILD_BENCH=OFF `
-    -DBUILD_FUZZ_BINARY=OFF `
+    "-DBUILD_FUZZ_BINARY=$buildFuzzValue" `
     -DENABLE_WALLET=OFF `
     -DENABLE_EXTERNAL_SIGNER=OFF `
     -DENABLE_IPC=OFF `

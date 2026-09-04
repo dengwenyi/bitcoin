@@ -427,7 +427,11 @@ if(WITH_EMBEDDED_ASMAP)
   target_compile_definitions(bitcoin_node PRIVATE ENABLE_EMBEDDED_ASMAP=1)
   target_compile_definitions(btc_node_optional PRIVATE ENABLE_EMBEDDED_ASMAP=1)
   include(TargetDataSources)
-  target_raw_data_sources(bitcoin_node NAMESPACE node::data
+  # Both rpc/net.cpp in btc_node_optional and init.cpp in bitcoin_node include
+  # this generated header. bitcoin_node already depends on btc_node_optional,
+  # so assigning generation to the first consumer gives both targets a valid
+  # build-order dependency.
+  target_raw_data_sources(btc_node_optional NAMESPACE node::data
     node/data/ip_asn.dat
   )
 endif()

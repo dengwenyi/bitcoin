@@ -136,11 +136,12 @@ FUZZ_TARGET(cmpctblock, .init = initialize_cmpctblock)
 
     AddrMan addrman{*setup->m_node.netgroupman, /*deterministic=*/true, /*consistency_check_ratio=*/0};
     auto peerman = PeerManager::make(connman, addrman,
-                                     /*banman=*/nullptr, chainman,
+                                     /*banman=*/nullptr, chainman.GetParams(),
                                      mempool, *setup->m_node.warnings,
                                      PeerManager::Options{
                                          .deterministic_rng = true,
-                                     });
+                                     }, node::MakeChainstateFacade(chainman),
+                                     node::MakeTxValidationFacade(chainman, mempool));
     connman.SetMsgProc(peerman.get());
 
     setup->m_node.validation_signals->RegisterValidationInterface(peerman.get());

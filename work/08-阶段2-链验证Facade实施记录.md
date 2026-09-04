@@ -126,3 +126,24 @@ facade 现已封装同步编排所需的剩余链状态控制能力：
 - 所有最终测试输出 `No errors detected` 且退出码为 0，Debug CRT 退出期报告与阶段 0 基线一致。
 
 新增专项首次运行时，测试交易输出金额沿用 `CMutableTransaction` 的默认负值，先命中 `bad-txns-vout-negative`，未到达预期 coinbase 分支。将测试输出设为非负金额，并按 package 的逐交易结果断言后，重新编译及以上三组测试全部通过；生产代码未因该测试夹具问题改变语义。
+
+## 10. 第六切片：由装配层注入验证端口
+
+`PeerManager::make` 不再接收 `ChainstateManager`。生产装配根 `init.cpp` 显式创建并注入 `ChainstateFacade` 与 `TxValidationFacade`，测试和 fuzz 夹具也采用相同方式；`net_processing.h/.cpp` 中已经没有 `ChainstateManager` 或 `chainman` 文本引用。链参数作为只读 `CChainParams` 单独注入，Peer 层不再通过完整链状态管理器取得配置。
+
+为了验证全部受影响入口，VS2022 配置脚本新增 `-BuildFuzz` 开关，并建立独立 fuzz 构建目录。一次全新 fuzz 编译暴露了原有生成文件顺序问题：`rpc/net.cpp` 在 `node/data/ip_asn.dat.h` 生成前开始编译。将 ASMap 原始数据生成责任从 `bitcoin_node` 移至其下游实际使用者 `btc_node_optional` 后，普通最小构建、测试构建和 fuzz 构建均能在干净目标图中正确生成该头文件。
+
+本切片验证结果：
+
+- 最小、测试、fuzz 三套 VS2022 Debug 配置均重新生成成功；
+- `bitcoind.exe`、`test_bitcoin.exe` 和 `fuzz.exe` 均完成编译与链接；
+- `cmpctblock`、`p2p_handshake`、`p2p_headers_presync`、`p2p_private_broadcast`、`process_message`、`process_messages` 六个受影响 fuzz harness 均被最终二进制列出，并以空输入运行通过；
+- 四链启动、regtest 持久化、干净重启和强制终止恢复通过；
+- 三节点 V1/V2 协商、101 块同步、103 高度竞争链重组和交易中继通过；
+- facade、BlockManager、网络、BIP324、DoS 和 validation 组合 43 项通过；
+- addrman、banman、blockencodings、headers sync、peer connection、peer eviction、peerman 和 timeoffsets 共 44 项通过；
+- 两组单元测试均输出 `No errors detected`，退出码 0；Debug CRT 退出期报告与阶段 0 基线一致。
+
+测试目标第一次编译时，`net_peer_connection_tests.cpp` 仅有 `ChainstateManager` 前置声明，调用 `GetParams()` 导致 incomplete type 编译错误；该夹具改为使用已经初始化的全局 `Params()` 后通过。全新 fuzz 构建第一次失败于上述 ASMap 生成头缺失，修正目标所有权和依赖顺序后，重新配置、编译及运行验证全部通过。这两次失败均保留为构建边界证据，没有被误报为成功。
+
+阶段 2 的“网络同步层不再直接持有完整 `ChainstateManager`”边界已经建立；方案要求的 typed validation event 尚未闭合，下一切片将把验证结果转换为同步层专用的类型化结果，完成后再判定阶段 2 结束。

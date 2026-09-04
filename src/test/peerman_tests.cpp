@@ -46,7 +46,10 @@ static void mineBlock(node::NodeContext& node, FakeNodeClock& clock, std::chrono
 BOOST_AUTO_TEST_CASE(connections_desirable_service_flags)
 {
     FakeNodeClock clock{};
-    std::unique_ptr<PeerManager> peerman = PeerManager::make(*m_node.connman, *m_node.addrman, nullptr, *m_node.chainman, *m_node.mempool, *m_node.warnings, {});
+    std::unique_ptr<PeerManager> peerman = PeerManager::make(
+        *m_node.connman, *m_node.addrman, nullptr, m_node.chainman->GetParams(),
+        *m_node.mempool, *m_node.warnings, {}, node::MakeChainstateFacade(*m_node.chainman),
+        node::MakeTxValidationFacade(*m_node.chainman, *m_node.mempool));
     auto consensus = m_node.chainman->GetParams().GetConsensus();
 
     // Check we start connecting to full nodes

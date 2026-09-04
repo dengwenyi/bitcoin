@@ -570,7 +570,7 @@ class PeerManagerImpl final : public PeerManager
 {
 public:
     PeerManagerImpl(CConnman& connman, AddrMan& addrman,
-                    BanMan* banman, ChainstateManager& chainman,
+                    BanMan* banman, const CChainParams& chainparams,
                     CTxMemPool& pool, node::Warnings& warnings, Options opts,
                     std::unique_ptr<node::ChainstateFacade> chainstate,
                     std::unique_ptr<node::TxValidationFacade> tx_validation);
@@ -2125,25 +2125,23 @@ util::Expected<void, std::string> PeerManagerImpl::FetchBlock(NodeId peer_id, co
 }
 
 std::unique_ptr<PeerManager> PeerManager::make(CConnman& connman, AddrMan& addrman,
-                                               BanMan* banman, ChainstateManager& chainman,
+                                               BanMan* banman, const CChainParams& chainparams,
                                                CTxMemPool& pool, node::Warnings& warnings, Options opts,
                                                std::unique_ptr<node::ChainstateFacade> chainstate,
                                                std::unique_ptr<node::TxValidationFacade> tx_validation)
 {
-    if (!chainstate) chainstate = node::MakeChainstateFacade(chainman);
-    if (!tx_validation) tx_validation = node::MakeTxValidationFacade(chainman, pool);
-    return std::make_unique<PeerManagerImpl>(connman, addrman, banman, chainman, pool, warnings, opts,
+    return std::make_unique<PeerManagerImpl>(connman, addrman, banman, chainparams, pool, warnings, opts,
                                              std::move(chainstate), std::move(tx_validation));
 }
 
 PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
-                                 BanMan* banman, ChainstateManager& chainman,
+                                 BanMan* banman, const CChainParams& chainparams,
                                  CTxMemPool& pool, node::Warnings& warnings, Options opts,
                                  std::unique_ptr<node::ChainstateFacade> chainstate,
                                  std::unique_ptr<node::TxValidationFacade> tx_validation)
     : m_rng{opts.deterministic_rng},
       m_fee_filter_rounder{CFeeRate{DEFAULT_MIN_RELAY_TX_FEE}, m_rng},
-      m_chainparams(chainman.GetParams()),
+      m_chainparams(chainparams),
       m_connman(connman),
       m_addrman(addrman),
       m_banman(banman),
