@@ -353,59 +353,7 @@ using PeerRef = std::shared_ptr<Peer>;
  * and we're no longer holding the node's locks.
  */
 struct CNodeState : node::PeerSyncState {
-    //! Whether we've started headers synchronization with this peer.
-    bool fSyncStarted{false};
-    //! Since when we're stalling block download progress (in microseconds), or 0.
-    std::chrono::microseconds m_stalling_since{0us};
     std::list<QueuedBlock> vBlocksInFlight;
-    //! When the first entry in vBlocksInFlight started downloading. Don't care when vBlocksInFlight is empty.
-    std::chrono::microseconds m_downloading_since{0us};
-    //! Whether we consider this a preferred download peer.
-    bool fPreferredDownload{false};
-    /** Whether this peer wants invs or cmpctblocks (when possible) for block announcements. */
-    bool m_requested_hb_cmpctblocks{false};
-    /** Whether this peer will send us cmpctblocks if we request them. */
-    bool m_provides_cmpctblocks{false};
-
-    /** State used to enforce CHAIN_SYNC_TIMEOUT and EXTRA_PEER_CHECK_INTERVAL logic.
-      *
-      * Both are only in effect for outbound, non-manual, non-protected connections.
-      * Any peer protected (m_protect = true) is not chosen for eviction. A peer is
-      * marked as protected if all of these are true:
-      *   - its connection type is IsBlockOnlyConn() == false
-      *   - it gave us a valid connecting header
-      *   - we haven't reached MAX_OUTBOUND_PEERS_TO_PROTECT_FROM_DISCONNECT yet
-      *   - its chain tip has at least as much work as ours
-      *
-      * CHAIN_SYNC_TIMEOUT: if a peer's best known block has less work than our tip,
-      * set a timeout CHAIN_SYNC_TIMEOUT in the future:
-      *   - If at timeout their best known block now has more work than our tip
-      *     when the timeout was set, then either reset the timeout or clear it
-      *     (after comparing against our current tip's work)
-      *   - If at timeout their best known block still has less work than our
-      *     tip did when the timeout was set, then send a getheaders message,
-      *     and set a shorter timeout, HEADERS_RESPONSE_TIME seconds in future.
-      *     If their best known block is still behind when that new timeout is
-      *     reached, disconnect.
-      *
-      * EXTRA_PEER_CHECK_INTERVAL: after each interval, if we have too many outbound peers,
-      * drop the outbound one that least recently announced us a new block.
-      */
-    struct ChainSyncTimeoutState {
-        //! A timeout used for checking whether our peer has sufficiently synced
-        std::chrono::seconds m_timeout{0s};
-        //! A header with the work we require on our peer's chain
-        const CBlockIndex* m_work_header{nullptr};
-        //! After timeout is reached, set to true after sending getheaders
-        bool m_sent_getheaders{false};
-        //! Whether this peer is protected from disconnection due to a bad/slow chain
-        bool m_protect{false};
-    };
-
-    ChainSyncTimeoutState m_chain_sync;
-
-    //! Time of last new block announcement
-    int64_t m_last_block_announcement{0};
 };
 
 struct InvToSendBucket {

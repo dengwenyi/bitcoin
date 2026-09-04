@@ -109,3 +109,19 @@
 - 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
 
 阶段 3 仍未完成。下一切片继续把下载调度字段迁入 `PeerSyncState`。
+
+## 7. 第七切片：Peer 同步调度标量
+
+将 `CNodeState` 中不依赖 in-flight 容器的同步调度状态移入 `PeerSyncState`：headers sync 启动标志、stall/download 时间、首选下载标志、high-bandwidth compact-block 能力、chain sync timeout/work header/getheaders/protection 状态，以及最后区块公告时间。`CNodeState` 暂时只保留 in-flight 区块队列。
+
+字段名、时间单位和默认值保持不变。专项测试新增全部默认值断言；原 headers sync、下载选择、超时驱逐和保护逻辑继续使用相同字段。
+
+本切片验证结果：
+
+- 最小 `bitcoind.exe`、`test_bitcoin.exe`、`fuzz.exe` 均重新编译并链接成功；
+- `peer_sync_state`、compact block、headers sync、peer connection、peer eviction 和 peerman 定向 17 项通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 持久化、干净重启和强制终止恢复通过；
+- V1/V2 协商、101 块同步、103 高度重组和交易中继通过；
+- 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
+
+阶段 3 仍未完成。下一切片迁移 in-flight 区块队列，使兼容 `CNodeState` 可以被完整替换。

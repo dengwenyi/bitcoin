@@ -7,6 +7,9 @@
 
 #include <uint256.h>
 
+#include <chrono>
+#include <cstdint>
+
 class CBlockIndex;
 
 namespace node {
@@ -21,6 +24,23 @@ struct PeerSyncState {
     const CBlockIndex* pindexLastCommonBlock{nullptr};
     /** Best header sent to the peer. */
     const CBlockIndex* pindexBestHeaderSent{nullptr};
+
+    bool fSyncStarted{false};
+    std::chrono::microseconds m_stalling_since{0};
+    std::chrono::microseconds m_downloading_since{0};
+    bool fPreferredDownload{false};
+    bool m_requested_hb_cmpctblocks{false};
+    bool m_provides_cmpctblocks{false};
+
+    struct ChainSyncTimeoutState {
+        std::chrono::seconds m_timeout{0};
+        const CBlockIndex* m_work_header{nullptr};
+        bool m_sent_getheaders{false};
+        bool m_protect{false};
+    };
+
+    ChainSyncTimeoutState m_chain_sync;
+    int64_t m_last_block_announcement{0};
 };
 
 } // namespace node
