@@ -44,3 +44,22 @@
 - 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
 
 阶段 3 仍未完成。下一切片继续处理按专用锁聚合的可变会话状态，保持一次只移动一个锁域。
+
+## 3. 第三切片：误行为锁域
+
+将误行为互斥量和一次性 `should discourage` 状态移入 `PeerSession`，对外只暴露：
+
+- `MarkForDiscouragement()`：在内部持锁设置待处理状态；
+- `ConsumeShouldDiscourage()`：在内部持锁读取并清除，确保同一决定只消费一次。
+
+`PeerManagerImpl` 的日志、NoBan、手工连接、本地地址和普通断连策略保持原样，只是不再直接获取会话内部互斥量。专项测试覆盖初始无状态、标记后消费成功以及第二次消费为空。
+
+本切片验证结果：
+
+- 最小 `bitcoind.exe`、`test_bitcoin.exe`、`fuzz.exe` 均重新编译并链接成功；
+- `peer_session`、DoS、peer connection 和 peerman 定向 8 项通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 持久化、干净重启和强制终止恢复通过；
+- V1/V2 协商、101 块同步、103 高度重组和交易中继通过；
+- 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
+
+阶段 3 仍未完成。下一切片迁移区块公告锁域，继续减少 `PeerManagerImpl` 对会话内部容器的直接访问。

@@ -7,6 +7,7 @@
 
 #include <node/eviction.h>
 #include <protocol.h>
+#include <sync.h>
 
 #include <atomic>
 #include <chrono>
@@ -47,6 +48,16 @@ struct PeerSession {
     std::atomic<std::chrono::seconds> m_time_offset{std::chrono::seconds{0}};
 
     PeerSession(NodeId id, ServiceFlags our_services, bool is_inbound);
+
+    /** Mark this session for disconnect and address discouragement. */
+    void MarkForDiscouragement();
+
+    /** Consume a pending discouragement decision exactly once. */
+    bool ConsumeShouldDiscourage();
+
+private:
+    Mutex m_misbehavior_mutex;
+    bool m_should_discourage GUARDED_BY(m_misbehavior_mutex){false};
 };
 
 } // namespace node

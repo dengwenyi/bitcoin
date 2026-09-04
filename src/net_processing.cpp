@@ -230,11 +230,6 @@ struct QueuedBlock {
  * TODO: move remaining application-layer data members from CNode to this structure.
  */
 struct Peer : node::PeerSession {
-    /** Protects misbehavior data members */
-    Mutex m_misbehavior_mutex;
-    /** Whether this peer should be disconnected and marked as discouraged (unless it has NetPermissionFlags::NoBan permission). */
-    bool m_should_discourage GUARDED_BY(m_misbehavior_mutex){false};
-
     /** Protects block inventory data members */
     Mutex m_block_inv_mutex;
     /** List of blocks that we'll announce via an `inv` message.
@@ -1956,10 +1951,8 @@ void PeerManagerImpl::AddToCompactExtraTransactions(const CTransactionRef& tx)
 
 void PeerManagerImpl::Misbehaving(Peer& peer, const std::string& message)
 {
-    LOCK(peer.m_misbehavior_mutex);
-
     const std::string message_prefixed = message.empty() ? "" : (": " + message);
-    peer.m_should_discourage = true;
+    peer.MarkForDiscouragement();
     LogDebug(BCLog::NET, "Misbehaving: peer=%d%s\n", peer.m_id, message_prefixed);
     TRACEPOINT(net, misbehaving_connection,
         peer.m_id,
@@ -5312,14 +5305,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
 bool PeerManagerImpl::MaybeDiscourageAndDisconnect(CNode& pnode, Peer& peer)
 {
-    {
-        LOCK(peer.m_misbehavior_mutex);
-
-        // There's nothing to do if the m_should_discourage flag isn't set
-        if (!peer.m_should_discourage) return false;
-
-        peer.m_should_discourage = false;
-    } // peer.m_misbehavior_mutex
+    if (!peer.ConsumeShouldDiscourage()) return false;
 
     if (pnode.HasPermission(NetPermissionFlags::NoBan)) {
         // We never disconnect or discourage peers for bad behavior if they have NetPermissionFlags::NoBan permission

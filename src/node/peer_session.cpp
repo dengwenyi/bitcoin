@@ -4,11 +4,25 @@
 
 #include <node/peer_session.h>
 
+#include <utility>
+
 namespace node {
 
 PeerSession::PeerSession(NodeId id, ServiceFlags our_services, bool is_inbound)
     : m_id{id}, m_our_services{our_services}, m_is_inbound{is_inbound}
 {
+}
+
+void PeerSession::MarkForDiscouragement()
+{
+    LOCK(m_misbehavior_mutex);
+    m_should_discourage = true;
+}
+
+bool PeerSession::ConsumeShouldDiscourage()
+{
+    LOCK(m_misbehavior_mutex);
+    return std::exchange(m_should_discourage, false);
 }
 
 } // namespace node
