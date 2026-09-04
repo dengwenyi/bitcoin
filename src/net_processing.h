@@ -9,6 +9,7 @@
 #include <consensus/amount.h>
 #include <net.h>
 #include <node/chainstate_facade.h>
+#include <node/tx_validation_facade.h>
 #include <node/txorphanage.h>
 #include <node/types.h>
 #include <private_broadcast.h>
@@ -115,7 +116,8 @@ public:
     static std::unique_ptr<PeerManager> make(CConnman& connman, AddrMan& addrman,
                                              BanMan* banman, ChainstateManager& chainman,
                                              CTxMemPool& pool, node::Warnings& warnings, Options opts,
-                                             std::unique_ptr<node::ChainstateFacade> chainstate = {});
+                                             std::unique_ptr<node::ChainstateFacade> chainstate = {},
+                                             std::unique_ptr<node::TxValidationFacade> tx_validation = {});
     virtual ~PeerManager() = default;
 
     /**

@@ -369,6 +369,7 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/mempool_args.cpp
   node/mempool_persist.cpp
   node/mempool_persist_args.cpp
+  node/tx_validation_facade.cpp
   node/warnings.cpp
   noui.cpp
   policy/settings.cpp

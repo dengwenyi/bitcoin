@@ -38,6 +38,7 @@
 #include <node/txdownloadman.h>
 #include <node/txorphanage.h>
 #include <node/txreconciliation.h>
+#include <node/tx_validation_facade.h>
 #include <node/warnings.h>
 #include <policy/feerate.h>
 #include <policy/fees/block_policy_estimator.h>
@@ -571,7 +572,8 @@ public:
     PeerManagerImpl(CConnman& connman, AddrMan& addrman,
                     BanMan* banman, ChainstateManager& chainman,
                     CTxMemPool& pool, node::Warnings& warnings, Options opts,
-                    std::unique_ptr<node::ChainstateFacade> chainstate);
+                    std::unique_ptr<node::ChainstateFacade> chainstate,
+                    std::unique_ptr<node::TxValidationFacade> tx_validation);
 
     /** Overridden from CValidationInterface. */
     void ActiveTipChange(const CBlockIndex& new_tip, bool) override
@@ -856,7 +858,7 @@ private:
     /** Pointer to this node's banman. May be nullptr - check existence before dereferencing. */
     BanMan* const m_banman;
     std::unique_ptr<node::ChainstateFacade> m_chainstate;
-    ChainstateManager& m_chainman;
+    std::unique_ptr<node::TxValidationFacade> m_tx_validation;
     CTxMemPool& m_mempool;
 
     /** Synchronizes tx download including TxRequestTracker, rejection filters, and TxOrphanage.
@@ -1756,7 +1758,7 @@ void PeerManagerImpl::ReattemptPrivateBroadcast(CScheduler& scheduler)
         for (const auto& stale_tx : stale_txs) {
             // Only hold lock per single submission
             LOCK(cs_main);
-            auto mempool_acceptable = m_chainman.ProcessTransaction(stale_tx, /*test_accept=*/true);
+            auto mempool_acceptable = m_tx_validation->ProcessTransaction(stale_tx, /*test_accept=*/true);
             if (mempool_acceptable.m_result_type == MempoolAcceptResult::ResultType::VALID) {
                 LogDebug(BCLog::PRIVBROADCAST,
                          "Reattempting broadcast of stale txid=%s wtxid=%s",
@@ -2125,16 +2127,20 @@ util::Expected<void, std::string> PeerManagerImpl::FetchBlock(NodeId peer_id, co
 std::unique_ptr<PeerManager> PeerManager::make(CConnman& connman, AddrMan& addrman,
                                                BanMan* banman, ChainstateManager& chainman,
                                                CTxMemPool& pool, node::Warnings& warnings, Options opts,
-                                               std::unique_ptr<node::ChainstateFacade> chainstate)
+                                               std::unique_ptr<node::ChainstateFacade> chainstate,
+                                               std::unique_ptr<node::TxValidationFacade> tx_validation)
 {
     if (!chainstate) chainstate = node::MakeChainstateFacade(chainman);
-    return std::make_unique<PeerManagerImpl>(connman, addrman, banman, chainman, pool, warnings, opts, std::move(chainstate));
+    if (!tx_validation) tx_validation = node::MakeTxValidationFacade(chainman, pool);
+    return std::make_unique<PeerManagerImpl>(connman, addrman, banman, chainman, pool, warnings, opts,
+                                             std::move(chainstate), std::move(tx_validation));
 }
 
 PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
                                  BanMan* banman, ChainstateManager& chainman,
                                  CTxMemPool& pool, node::Warnings& warnings, Options opts,
-                                 std::unique_ptr<node::ChainstateFacade> chainstate)
+                                 std::unique_ptr<node::ChainstateFacade> chainstate,
+                                 std::unique_ptr<node::TxValidationFacade> tx_validation)
     : m_rng{opts.deterministic_rng},
       m_fee_filter_rounder{CFeeRate{DEFAULT_MIN_RELAY_TX_FEE}, m_rng},
       m_chainparams(chainman.GetParams()),
@@ -2142,7 +2148,7 @@ PeerManagerImpl::PeerManagerImpl(CConnman& connman, AddrMan& addrman,
       m_addrman(addrman),
       m_banman(banman),
       m_chainstate{Assert(std::move(chainstate))},
-      m_chainman(chainman),
+      m_tx_validation{Assert(std::move(tx_validation))},
       m_mempool(pool),
       m_txdownloadman{node::TxDownloadOptions{pool, opts.deterministic_rng}},
       m_warnings{warnings},
@@ -3489,7 +3495,7 @@ bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
     LOCK2(::cs_main, m_tx_download_mutex);
 
     while (CTransactionRef porphanTx = m_txdownloadman.GetTxToReconsider(peer.m_id)) {
-        const MempoolAcceptResult result = m_chainman.ProcessTransaction(porphanTx);
+        const MempoolAcceptResult result = m_tx_validation->ProcessTransaction(porphanTx);
         const TxValidationState& state = result.m_state;
         const Txid& orphanHash = porphanTx->GetHash();
         const Wtxid& orphan_wtxid = porphanTx->GetWitnessHash();
@@ -4759,7 +4765,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
             }
 
             if (package_to_validate) {
-                const auto package_result{ProcessNewPackage(m_chainman.ActiveChainstate(), m_mempool, package_to_validate->m_txns, /*test_accept=*/false, /*client_maxfeerate=*/std::nullopt)};
+                const auto package_result{m_tx_validation->ProcessPackage(package_to_validate->m_txns)};
                 LogDebug(BCLog::TXPACKAGES, "package evaluation for %s: %s\n", package_to_validate->ToString(),
                          package_result.m_state.IsValid() ? "package accepted" : "package rejected");
                 ProcessPackageResult(package_to_validate.value(), package_result);
@@ -4770,7 +4776,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         // ReceivedTx should not be telling us to validate the tx and a package.
         Assume(!package_to_validate.has_value());
 
-        const MempoolAcceptResult result = m_chainman.ProcessTransaction(ptx);
+        const MempoolAcceptResult result = m_tx_validation->ProcessTransaction(ptx);
         const TxValidationState& state = result.m_state;
 
         if (result.m_result_type == MempoolAcceptResult::ResultType::VALID) {
@@ -4779,7 +4785,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         }
         if (state.IsInvalid()) {
             if (auto package_to_validate{ProcessInvalidTx(pfrom.GetId(), ptx, state, /*first_time_failure=*/true)}) {
-                const auto package_result{ProcessNewPackage(m_chainman.ActiveChainstate(), m_mempool, package_to_validate->m_txns, /*test_accept=*/false, /*client_maxfeerate=*/std::nullopt)};
+                const auto package_result{m_tx_validation->ProcessPackage(package_to_validate->m_txns)};
                 LogDebug(BCLog::TXPACKAGES, "package evaluation for %s: %s\n", package_to_validate->ToString(),
                          package_result.m_state.IsValid() ? "package accepted" : "package rejected");
                 ProcessPackageResult(package_to_validate.value(), package_result);

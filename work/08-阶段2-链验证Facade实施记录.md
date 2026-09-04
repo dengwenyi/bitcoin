@@ -107,3 +107,22 @@ facade 现已封装同步编排所需的剩余链状态控制能力：
 - 两组测试均输出 `No errors detected` 且退出码为 0，Debug CRT 退出期报告与阶段 0 基线一致。
 
 测试目标首次构建在自动化命令的 120 秒等待上限处被中止，当时没有编译诊断；利用已生成对象增量重跑后，`test_bitcoin.exe` 完成链接。该工具等待超时未被记作编译通过或代码失败。
+
+## 9. 第五切片：独立交易验证端口
+
+新增 `node::TxValidationFacade`，只向 P2P 交易中继暴露两个行为：单交易 mempool 接受，以及不带本地客户端费率上限的 P2P package 提交。默认适配器持有 `ChainstateManager` 与 mempool 的具体引用，但实现文件归属当前 composition 目标 `bitcoin_node`；`btc_chainstate` 和 `btc_tx_relay` 均不新增对另一方的目标链接。
+
+`PeerManagerImpl` 改为持有 `TxValidationFacade`，5 处单交易/package 接受调用全部迁移，`m_chainman` 成员及其直接访问从 7 处降为 0。当前 `PeerManager::make` 仍接收 `ChainstateManager`，用于默认构造两个 facade 和取得 chain params；因此阶段 2 尚未完成。下一切片会把具体适配器创建移到 `init.cpp` composition root，并从 PeerManager API 删除完整 `ChainstateManager` 参数。
+
+第五切片验证结果：
+
+- 最小配置与测试配置均重新生成成功，CMake 反向链接门禁通过；
+- VS2022 Debug 最小 `bitcoind.exe` 和 `test_bitcoin.exe` 均编译、链接成功；
+- 四链启动、regtest 三块持久化、干净重启和强制终止恢复通过；
+- 三节点 V1/V2 协商、101 块同步、103 高度竞争链重组和交易中继通过；
+- 新增 facade 专项验证 coinbase 单交易和 package 均被拒绝，且 mempool 数量不变；
+- 原交易中继 52 项加 facade 新用例共 53 项通过；
+- facade、BlockManager、网络、BIP324、DoS 和 validation 组合共 43 项通过；
+- 所有最终测试输出 `No errors detected` 且退出码为 0，Debug CRT 退出期报告与阶段 0 基线一致。
+
+新增专项首次运行时，测试交易输出金额沿用 `CMutableTransaction` 的默认负值，先命中 `bad-txns-vout-negative`，未到达预期 coinbase 分支。将测试输出设为非负金额，并按 package 的逐交易结果断言后，重新编译及以上三组测试全部通过；生产代码未因该测试夹具问题改变语义。
