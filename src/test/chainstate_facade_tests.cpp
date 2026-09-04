@@ -41,8 +41,24 @@ BOOST_AUTO_TEST_CASE(query_forwarding)
         BOOST_CHECK(facade->GetHistoricalBlockRange() == m_node.chainman->GetHistoricalBlockRange());
     }
 
-    BlockValidationState state;
-    BOOST_CHECK(facade->ActivateBestChain(state, {}));
+    const auto activation{facade->ActivateBestChain({})};
+    BOOST_CHECK(activation.accepted);
+
+    const auto headers{facade->ProcessNewBlockHeaders({{Params().GenesisBlock()}}, /*min_pow_checked=*/true)};
+    BOOST_CHECK(headers.accepted);
+    BOOST_CHECK(!headers.invalid);
+    BOOST_CHECK(headers.result == BlockValidationResult::BLOCK_RESULT_UNSET);
+    BOOST_CHECK_EQUAL(headers.block_index, tip);
+
+    CBlockHeader invalid_header{Params().GenesisBlock()};
+    invalid_header.nBits = 0;
+    const auto invalid_headers{facade->ProcessNewBlockHeaders(
+        {{invalid_header}}, /*min_pow_checked=*/true)};
+    BOOST_CHECK(!invalid_headers.accepted);
+    BOOST_CHECK(invalid_headers.invalid);
+    BOOST_CHECK(invalid_headers.result == BlockValidationResult::BLOCK_INVALID_HEADER);
+    BOOST_CHECK(!invalid_headers.debug_message.empty());
+    BOOST_CHECK_EQUAL(invalid_headers.block_index, nullptr);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -147,3 +147,29 @@ facade 现已封装同步编排所需的剩余链状态控制能力：
 测试目标第一次编译时，`net_peer_connection_tests.cpp` 仅有 `ChainstateManager` 前置声明，调用 `GetParams()` 导致 incomplete type 编译错误；该夹具改为使用已经初始化的全局 `Params()` 后通过。全新 fuzz 构建第一次失败于上述 ASMap 生成头缺失，修正目标所有权和依赖顺序后，重新配置、编译及运行验证全部通过。这两次失败均保留为构建边界证据，没有被误报为成功。
 
 阶段 2 的“网络同步层不再直接持有完整 `ChainstateManager`”边界已经建立；方案要求的 typed validation event 尚未闭合，下一切片将把验证结果转换为同步层专用的类型化结果，完成后再判定阶段 2 结束。
+
+## 11. 第七切片：类型化验证事件与阶段 2 完成
+
+`ChainstateFacade` 不再要求同步层创建或传入可变的 `BlockValidationState`，而是为三类链状态写操作返回明确结果：
+
+- `HeaderValidationEvent`：headers 是否被接受、是否无效、稳定的 `BlockValidationResult` 结果码、诊断文本和最后区块索引；
+- `ChainActivationEvent`：best-chain 激活是否成功及失败描述；
+- `BlockProcessingEvent`：区块提交是否完成以及是否为新区块。
+
+Peer 层据此完成 headers/compact-block 惩罚决策、激活失败日志和新区块请求清理，不再从调用侧构造验证实现状态。`BlockChecked` 中保留的 `BlockValidationState` 仅属于 Bitcoin Core 既有 `ValidationSignals` 回调 ABI，不是 facade 调用依赖；`ChainstateFacade` 公开头中已经没有该类型。
+
+专项测试同时覆盖类型化事件的两条路径：重复提交已知 genesis header 时返回 accepted、unset 结果码和正确索引；提交难度字段无效的 header 时返回 rejected、`BLOCK_INVALID_HEADER`、非空诊断文本和空索引。这样不仅验证字段存在，也验证适配器没有丢失同步层用于行为决策的信息。
+
+最终验证结果：
+
+- VS2022 Debug 最小 `bitcoind.exe`、`test_bitcoin.exe` 和 `fuzz.exe` 均重新编译、链接成功；
+- facade、BlockManager、网络、BIP324、DoS 和 validation 组合 43 项通过；新增失败事件断言后，facade 专项再次编译并单独运行通过；
+- Peer 连接、驱逐、headers sync、compact block、addrman、banman 和 timeoffsets 组合 44 项通过；
+- 四链启动/停止、regtest 三块持久化、干净重启和强制终止恢复通过；
+- V1/V2 实际协商、101 块同步、103 高度竞争链重组和交易中继通过；
+- 六个受影响 fuzz harness 均以 EOF 空输入运行通过，退出码 0；
+- 单元测试输出 `No errors detected` 且退出码为 0，Debug CRT 退出期报告与阶段 0 基线一致。
+
+测试目标首次编译在 120 秒工具上限处被中止，日志没有编译错误但尚未链接；增量重跑后明确完成 `test_bitcoin.exe` 链接。第一次 fuzz 运行命令因 PowerShell 将 `NUL` 解析为工作区路径而在启动二进制前失败，改用非交互进程的自然 EOF 后六个目标全部通过；该命令错误没有被算作 fuzz 执行结果。
+
+至此阶段 2 的三项准入条件均已满足：链验证行为由窄 facade 包装，`net_processing` 不再持有或访问完整 `ChainstateManager`，验证调用通过类型化结果返回同步层。阶段 3 可以在该边界上拆分 per-peer 会话状态与 headers/block 下载调度。

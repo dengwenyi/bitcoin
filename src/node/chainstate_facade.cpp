@@ -18,20 +18,28 @@ class ChainstateFacadeImpl final : public ChainstateFacade
 public:
     explicit ChainstateFacadeImpl(ChainstateManager& chainman) : m_chainman{chainman} {}
 
-    bool ProcessNewBlockHeaders(std::span<const CBlockHeader> headers,
-                                bool min_pow_checked,
-                                BlockValidationState& state,
-                                const CBlockIndex** block_index) override
+    HeaderValidationEvent ProcessNewBlockHeaders(std::span<const CBlockHeader> headers,
+                                                 bool min_pow_checked) override
     {
-        return m_chainman.ProcessNewBlockHeaders(headers, min_pow_checked, state, block_index);
+        BlockValidationState state;
+        const CBlockIndex* block_index{nullptr};
+        const bool accepted{m_chainman.ProcessNewBlockHeaders(headers, min_pow_checked, state, &block_index)};
+        return {
+            .accepted = accepted,
+            .invalid = state.IsInvalid(),
+            .result = state.GetResult(),
+            .debug_message = state.GetDebugMessage(),
+            .block_index = block_index,
+        };
     }
 
-    bool ProcessNewBlock(const std::shared_ptr<const CBlock>& block,
-                         bool force_processing,
-                         bool min_pow_checked,
-                         bool* new_block) override
+    BlockProcessingEvent ProcessNewBlock(const std::shared_ptr<const CBlock>& block,
+                                         bool force_processing,
+                                         bool min_pow_checked) override
     {
-        return m_chainman.ProcessNewBlock(block, force_processing, min_pow_checked, new_block);
+        bool new_block{false};
+        const bool accepted{m_chainman.ProcessNewBlock(block, force_processing, min_pow_checked, &new_block)};
+        return {.accepted = accepted, .new_block = new_block};
     }
 
     CBlockLocator GetLocator(const CBlockIndex* block_index) const override
@@ -141,10 +149,11 @@ public:
         return DeploymentActiveAfter(previous_block, m_chainman, Consensus::DEPLOYMENT_SEGWIT);
     }
 
-    bool ActivateBestChain(BlockValidationState& state,
-                           const std::shared_ptr<const CBlock>& recent_block) override
+    ChainActivationEvent ActivateBestChain(const std::shared_ptr<const CBlock>& recent_block) override
     {
-        return m_chainman.ActiveChainstate().ActivateBestChain(state, recent_block);
+        BlockValidationState state;
+        const bool accepted{m_chainman.ActiveChainstate().ActivateBestChain(state, recent_block)};
+        return {.accepted = accepted, .description = state.ToString()};
     }
 
     const CBlockIndex* FindForkInGlobalIndex(const CBlockLocator& locator) const override

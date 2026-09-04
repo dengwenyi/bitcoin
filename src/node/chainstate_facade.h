@@ -6,16 +6,17 @@
 #define BITCOIN_NODE_CHAINSTATE_FACADE_H
 
 #include <arith_uint256.h>
+#include <consensus/validation.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
-class BlockValidationState;
 class CBlock;
 class CBlockHeader;
 class CBlockIndex;
@@ -26,20 +27,38 @@ struct FlatFilePos;
 
 namespace node {
 
+/** Typed result of validating a header sequence at the chainstate boundary. */
+struct HeaderValidationEvent {
+    bool accepted{false};
+    bool invalid{false};
+    BlockValidationResult result{BlockValidationResult::BLOCK_RESULT_UNSET};
+    std::string debug_message;
+    const CBlockIndex* block_index{nullptr};
+};
+
+/** Typed result of attempting to activate the best known chain. */
+struct ChainActivationEvent {
+    bool accepted{false};
+    std::string description;
+};
+
+/** Typed result of submitting a block to validation. */
+struct BlockProcessingEvent {
+    bool accepted{false};
+    bool new_block{false};
+};
+
 /** Narrow validation port used by peer processing for chain mutations and sync state. */
 class ChainstateFacade
 {
 public:
     virtual ~ChainstateFacade() = default;
 
-    virtual bool ProcessNewBlockHeaders(std::span<const CBlockHeader> headers,
-                                        bool min_pow_checked,
-                                        BlockValidationState& state,
-                                        const CBlockIndex** block_index = nullptr) = 0;
-    virtual bool ProcessNewBlock(const std::shared_ptr<const CBlock>& block,
-                                 bool force_processing,
-                                 bool min_pow_checked,
-                                 bool* new_block) = 0;
+    virtual HeaderValidationEvent ProcessNewBlockHeaders(std::span<const CBlockHeader> headers,
+                                                         bool min_pow_checked) = 0;
+    virtual BlockProcessingEvent ProcessNewBlock(const std::shared_ptr<const CBlock>& block,
+                                                 bool force_processing,
+                                                 bool min_pow_checked) = 0;
     virtual CBlockLocator GetLocator(const CBlockIndex* block_index) const = 0;
     virtual bool IsInitialBlockDownload() const = 0;
 
@@ -66,8 +85,7 @@ public:
     virtual const CBlockIndex* UnvalidatedSnapshotBase() const = 0;
     virtual bool IsSegwitActiveAt(const CBlockIndex& block_index) const = 0;
     virtual bool IsSegwitActiveAfter(const CBlockIndex* previous_block) const = 0;
-    virtual bool ActivateBestChain(BlockValidationState& state,
-                                   const std::shared_ptr<const CBlock>& recent_block) = 0;
+    virtual ChainActivationEvent ActivateBestChain(const std::shared_ptr<const CBlock>& recent_block) = 0;
     virtual const CBlockIndex* FindForkInGlobalIndex(const CBlockLocator& locator) const = 0;
     virtual void ReportHeadersPresync(int64_t height, int64_t timestamp) = 0;
     virtual std::optional<std::pair<const CBlockIndex*, const CBlockIndex*>> GetHistoricalBlockRange() const = 0;

@@ -653,14 +653,14 @@ private:
     void Misbehaving(Peer& peer, const std::string& message);
 
     /**
-     * Potentially mark a node discouraged based on the contents of a BlockValidationState object
+     * Potentially mark a node discouraged based on a block validation result.
      *
      * @param[in] via_compact_block this bool is passed in because net_processing should
      * punish peers differently depending on whether the data was provided in a compact
      * block message or not. If the compact block had a valid header, but contained invalid
      * txs, the peer should not be punished. See BIP 152.
      */
-    void MaybePunishNodeForBlock(NodeId nodeid, const BlockValidationState& state,
+    void MaybePunishNodeForBlock(NodeId nodeid, BlockValidationResult result,
                                  bool via_compact_block, const std::string& message = "")
         EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex);
 
@@ -2030,11 +2030,11 @@ void PeerManagerImpl::Misbehaving(Peer& peer, const std::string& message)
     );
 }
 
-void PeerManagerImpl::MaybePunishNodeForBlock(NodeId nodeid, const BlockValidationState& state,
+void PeerManagerImpl::MaybePunishNodeForBlock(NodeId nodeid, BlockValidationResult result,
                                               bool via_compact_block, const std::string& message)
 {
     PeerRef peer{GetPeerRef(nodeid)};
-    switch (state.GetResult()) {
+    switch (result) {
     case BlockValidationResult::BLOCK_RESULT_UNSET:
         break;
     case BlockValidationResult::BLOCK_HEADER_LOW_WORK:
@@ -2344,7 +2344,8 @@ void PeerManagerImpl::BlockChecked(const std::shared_ptr<const CBlock>& block, c
     if (state.IsInvalid() &&
         it != mapBlockSource.end() &&
         State(it->second.first)) {
-            MaybePunishNodeForBlock(/*nodeid=*/ it->second.first, state, /*via_compact_block=*/ !it->second.second);
+            MaybePunishNodeForBlock(/*nodeid=*/it->second.first, state.GetResult(),
+                                    /*via_compact_block=*/!it->second.second);
     }
     // Check that:
     // 1. The block is valid
@@ -2603,9 +2604,9 @@ void PeerManagerImpl::ProcessGetBlockData(CNode& pfrom, Peer& peer, const CInv& 
         }
     } // release cs_main before calling ActivateBestChain
     if (need_activate_chain) {
-        BlockValidationState state;
-        if (!m_chainstate->ActivateBestChain(state, a_recent_block)) {
-            LogDebug(BCLog::NET, "failed to activate chain (%s)\n", state.ToString());
+        const auto event{m_chainstate->ActivateBestChain(a_recent_block)};
+        if (!event.accepted) {
+            LogDebug(BCLog::NET, "failed to activate chain (%s)\n", event.description);
         }
     }
 
@@ -3342,26 +3343,24 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
     bool received_new_header{last_received_header == nullptr};
 
     // Now process all the headers.
-    BlockValidationState state;
-    const bool processed{m_chainstate->ProcessNewBlockHeaders(headers,
-                                                           /*min_pow_checked=*/true,
-                                                           state, &pindexLast)};
-    if (!processed) {
-        if (state.IsInvalid()) {
-            if (!pfrom.IsInboundConn() && state.GetResult() == BlockValidationResult::BLOCK_CACHED_INVALID) {
+    const auto event{m_chainstate->ProcessNewBlockHeaders(headers, /*min_pow_checked=*/true)};
+    pindexLast = event.block_index;
+    if (!event.accepted) {
+        if (event.invalid) {
+            if (!pfrom.IsInboundConn() && event.result == BlockValidationResult::BLOCK_CACHED_INVALID) {
                 // Warn user if outgoing peers send us headers of blocks that we previously marked as invalid.
                 LogWarning("%s (received from peer=%i). "
                            "If this happens with all peers, consider database corruption (that -reindex may fix) "
                            "or a potential consensus incompatibility.",
-                           state.GetDebugMessage(), pfrom.GetId());
+                           event.debug_message, pfrom.GetId());
             }
-            MaybePunishNodeForBlock(pfrom.GetId(), state, via_compact_block, "invalid header received");
+            MaybePunishNodeForBlock(pfrom.GetId(), event.result, via_compact_block, "invalid header received");
             return;
         }
     }
     assert(pindexLast);
 
-    if (processed && received_new_header) {
+    if (event.accepted && received_new_header) {
         LogBlockHeader(*pindexLast, pfrom, /*via_compact_block=*/false);
     }
 
@@ -3686,9 +3685,8 @@ void PeerManagerImpl::ProcessGetCFCheckPt(CNode& node, Peer& peer, DataStream& v
 
 void PeerManagerImpl::ProcessBlock(CNode& node, const std::shared_ptr<const CBlock>& block, bool force_processing, bool min_pow_checked)
 {
-    bool new_block{false};
-    m_chainstate->ProcessNewBlock(block, force_processing, min_pow_checked, &new_block);
-    if (new_block) {
+    const auto event{m_chainstate->ProcessNewBlock(block, force_processing, min_pow_checked)};
+    if (event.new_block) {
         node.m_last_block_time = GetTime<std::chrono::seconds>();
         // In case this block came from a different peer than we requested
         // from, we can erase the block request now anyway (as we just stored
@@ -4522,9 +4520,9 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
                 LOCK(m_most_recent_block_mutex);
                 a_recent_block = m_most_recent_block;
             }
-            BlockValidationState state;
-            if (!m_chainstate->ActivateBestChain(state, a_recent_block)) {
-                LogDebug(BCLog::NET, "failed to activate chain (%s)\n", state.ToString());
+            const auto event{m_chainstate->ActivateBestChain(a_recent_block)};
+            if (!event.accepted) {
+                LogDebug(BCLog::NET, "failed to activate chain (%s)\n", event.description);
             }
         }
 
@@ -4840,11 +4838,13 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         }
         }
 
-        const CBlockIndex *pindex = nullptr;
-        BlockValidationState state;
-        if (!m_chainstate->ProcessNewBlockHeaders({{cmpctblock.header}}, /*min_pow_checked=*/true, state, &pindex)) {
-            if (state.IsInvalid()) {
-                MaybePunishNodeForBlock(pfrom.GetId(), state, /*via_compact_block=*/true, "invalid header via cmpctblock");
+        const auto event{m_chainstate->ProcessNewBlockHeaders(
+            {{cmpctblock.header}}, /*min_pow_checked=*/true)};
+        const CBlockIndex* pindex{event.block_index};
+        if (!event.accepted) {
+            if (event.invalid) {
+                MaybePunishNodeForBlock(pfrom.GetId(), event.result,
+                                        /*via_compact_block=*/true, "invalid header via cmpctblock");
                 return;
             }
         }
