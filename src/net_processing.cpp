@@ -210,13 +210,7 @@ static constexpr auto PRIVATE_BROADCAST_MAX_CONNECTION_LIFETIME{3min};
 
 // Internal stuff
 namespace {
-/** Blocks that are in flight, and that are in the queue to be downloaded. */
-struct QueuedBlock {
-    /** BlockIndex. We must have this since we only request blocks when we've already validated the header. */
-    const CBlockIndex* pindex;
-    /** Optional, used for CMPCTBLOCK downloads */
-    std::unique_ptr<PartiallyDownloadedBlock> partialBlock;
-};
+using QueuedBlock = node::QueuedBlock;
 
 /**
  * Data structure for an individual peer. This struct is not protected by
@@ -352,9 +346,7 @@ using PeerRef = std::shared_ptr<Peer>;
  * processing of incoming data is done after the ProcessMessage call returns,
  * and we're no longer holding the node's locks.
  */
-struct CNodeState : node::PeerSyncState {
-    std::list<QueuedBlock> vBlocksInFlight;
-};
+using CNodeState = node::PeerSyncState;
 
 struct InvToSendBucket {
     const double count_floor{0};

@@ -125,3 +125,21 @@
 - 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
 
 阶段 3 仍未完成。下一切片迁移 in-flight 区块队列，使兼容 `CNodeState` 可以被完整替换。
+
+## 8. 第八切片：Peer 区块下载队列
+
+将 `QueuedBlock` 以及每个 peer 的 `vBlocksInFlight` 队列移入独立的 `node::PeerSyncState`。`QueuedBlock` 继续保存已验证 header 对应的 `CBlockIndex` 指针以及可选的 `PartiallyDownloadedBlock`，原下载、compact-block 和超时调度调用点保持字段名与容器语义不变。为避免向头文件使用者暴露 compact-block 实现，`PartiallyDownloadedBlock` 仅前置声明，构造、移动操作和析构在 `peer_sync_state.cpp` 中定义。
+
+迁移后，`net_processing.cpp` 内不再定义本地 `QueuedBlock`，原兼容 `CNodeState` 也已完全替换为 `node::PeerSyncState` 别名。新实现文件归入既有 `btc_peer_protocol` 目标，没有新增反向依赖。专项测试补充默认 in-flight 队列为空的断言。
+
+首轮最小目标编译发现：显式声明析构函数后，编译器不再隐式生成移动构造，`std::list` 插入因尝试调用已删除的拷贝构造而失败。修复为显式声明并在实现文件中默认定义 move-only 构造/赋值，随后三套目标全部重新编译成功。该失败属于编译期接口完整性问题，没有生成可供运行验收的新二进制；修复后验证结果如下：
+
+- 最小、测试和 fuzz 三套 VS2022 Debug 配置重新生成成功；
+- `bitcoind.exe`、`test_bitcoin.exe`、`fuzz.exe` 均重新编译并链接成功；
+- `peer_sync_state`、compact block、headers sync、peer connection、peer eviction 和 peerman 定向 17 项通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 三块持久化、干净重启和强制终止恢复通过；
+- 三节点 V1/V2 协商、101 块同步、103 高度竞争链重组和交易中继通过；
+- `cmpctblock`、`p2p_handshake`、`p2p_headers_presync`、`p2p_private_broadcast`、`process_message`、`process_messages` 六个受影响 fuzz harness 均以 EOF 空输入运行通过；
+- Windows Debug CRT 退出期报告与阶段 0 基线一致，测试进程退出码仍为 0。
+
+阶段 3 仍未完成。下一切片处理 `Peer` 中独立的 headers-sync 锁域；随后再建立可选交易/内存池路径的构建边界。

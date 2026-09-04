@@ -9,13 +9,31 @@
 
 #include <chrono>
 #include <cstdint>
+#include <list>
+#include <memory>
 
 class CBlockIndex;
+class PartiallyDownloadedBlock;
 
 namespace node {
 
+/** One validated-header block currently scheduled for download. */
+struct QueuedBlock {
+    const CBlockIndex* pindex;
+    std::unique_ptr<PartiallyDownloadedBlock> partialBlock;
+
+    QueuedBlock(const CBlockIndex* block_index, std::unique_ptr<PartiallyDownloadedBlock> partial_block);
+    QueuedBlock(QueuedBlock&&) noexcept;
+    QueuedBlock& operator=(QueuedBlock&&) noexcept;
+    QueuedBlock(const QueuedBlock&) = delete;
+    QueuedBlock& operator=(const QueuedBlock&) = delete;
+    ~QueuedBlock();
+};
+
 /** Chain-view state maintained independently for each peer. */
 struct PeerSyncState {
+    ~PeerSyncState();
+
     /** Best known block announced by the peer. */
     const CBlockIndex* pindexBestKnownBlock{nullptr};
     /** Last announced block whose index was not yet known. */
@@ -27,6 +45,7 @@ struct PeerSyncState {
 
     bool fSyncStarted{false};
     std::chrono::microseconds m_stalling_since{0};
+    std::list<QueuedBlock> vBlocksInFlight;
     std::chrono::microseconds m_downloading_since{0};
     bool fPreferredDownload{false};
     bool m_requested_hb_cmpctblocks{false};

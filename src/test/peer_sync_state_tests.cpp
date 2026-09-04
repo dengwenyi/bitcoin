@@ -17,6 +17,7 @@ BOOST_AUTO_TEST_CASE(default_chain_view)
     BOOST_CHECK_EQUAL(state.pindexBestHeaderSent, nullptr);
     BOOST_CHECK(!state.fSyncStarted);
     BOOST_CHECK(state.m_stalling_since == std::chrono::microseconds{0});
+    BOOST_CHECK(state.vBlocksInFlight.empty());
     BOOST_CHECK(state.m_downloading_since == std::chrono::microseconds{0});
     BOOST_CHECK(!state.fPreferredDownload);
     BOOST_CHECK(!state.m_requested_hb_cmpctblocks);
