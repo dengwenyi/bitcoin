@@ -124,6 +124,44 @@ public:
         return m_chainman.m_best_header;
     }
 
+    const CBlockIndex* UnvalidatedSnapshotBase() const override
+    {
+        const Chainstate& current{m_chainman.CurrentChainstate()};
+        const CBlockIndex* snapshot_base{current.SnapshotBase()};
+        return snapshot_base && current.m_assumeutxo == Assumeutxo::UNVALIDATED ? snapshot_base : nullptr;
+    }
+
+    bool IsSegwitActiveAt(const CBlockIndex& block_index) const override
+    {
+        return DeploymentActiveAt(block_index, m_chainman, Consensus::DEPLOYMENT_SEGWIT);
+    }
+
+    bool IsSegwitActiveAfter(const CBlockIndex* previous_block) const override
+    {
+        return DeploymentActiveAfter(previous_block, m_chainman, Consensus::DEPLOYMENT_SEGWIT);
+    }
+
+    bool ActivateBestChain(BlockValidationState& state,
+                           const std::shared_ptr<const CBlock>& recent_block) override
+    {
+        return m_chainman.ActiveChainstate().ActivateBestChain(state, recent_block);
+    }
+
+    const CBlockIndex* FindForkInGlobalIndex(const CBlockLocator& locator) const override
+    {
+        return m_chainman.ActiveChainstate().FindForkInGlobalIndex(locator);
+    }
+
+    void ReportHeadersPresync(int64_t height, int64_t timestamp) override
+    {
+        m_chainman.ReportHeadersPresync(height, timestamp);
+    }
+
+    std::optional<std::pair<const CBlockIndex*, const CBlockIndex*>> GetHistoricalBlockRange() const override
+    {
+        return m_chainman.GetHistoricalBlockRange();
+    }
+
 private:
     ChainstateManager& m_chainman;
 };

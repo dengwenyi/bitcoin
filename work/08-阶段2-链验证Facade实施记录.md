@@ -83,3 +83,27 @@ facade 现已增加活动链 tip、高度、包含关系、后继索引、按高
 新增 minimum chain work 断言首次使用 `BOOST_CHECK_EQUAL` 时，Boost 因 `arith_uint256` 没有可打印的流输出运算符而编译失败；断言改为布尔相等比较后重新编译并通过。该失败属于测试表达式兼容问题，没有修改生产语义。Windows Debug CRT 退出期报告仍与阶段 0 基线一致。
 
 下一切片将优先封装 assumeutxo 快照、SegWit 部署状态、best-chain 激活和 fork 查询，再单独处理交易与 package 验证端口。
+
+## 8. 第四切片：链同步控制端口
+
+facade 现已封装同步编排所需的剩余链状态控制能力：
+
+- 仅在 assumeutxo 后台验证尚未完成时返回当前快照基点；
+- 查询指定区块或其后继位置的 SegWit 激活状态；
+- 在不持有 `cs_main` 时触发 active chainstate 的 `ActivateBestChain`；
+- 按 locator 在全局索引中定位活动链 fork；
+- 上报 headers 预同步进度；
+- 查询需要补齐的历史区块范围。
+
+这些方法保留原调用点的锁范围、返回值与日志路径。`net_processing.cpp` 中 `m_chainman` 文本引用从 21 降为 7，facade 调用增至 119；剩余 7 处是成员声明/构造和 5 处交易或 package 接受调用，下一切片将使用独立交易验证端口迁移。
+
+第四切片验证结果：
+
+- VS2022 Debug 最小目标完整编译并链接 `bitcoind.exe`，MSBuild 退出码 0；
+- 四链启动、regtest 三块持久化、干净重启和强制终止恢复通过；
+- 三节点 V1/V2 协商、101 块同步、103 高度竞争链重组和交易中继通过；
+- facade、BlockManager、网络、BIP324、DoS 和 validation 组合 42 项通过；
+- facade、headers-sync chainwork、Chainstate、ChainstateManager 和 versionbits 专项 22 项通过，其中覆盖快照激活、模拟重启、快照完成与 fork 失效恢复；
+- 两组测试均输出 `No errors detected` 且退出码为 0，Debug CRT 退出期报告与阶段 0 基线一致。
+
+测试目标首次构建在自动化命令的 120 秒等待上限处被中止，当时没有编译诊断；利用已生成对象增量重跑后，`test_bitcoin.exe` 完成链接。该工具等待超时未被记作编译通过或代码失败。

@@ -1517,8 +1517,8 @@ void PeerManagerImpl::FindNextBlocksToDownload(const Peer& peer, unsigned int co
     // abort downloading blocks from peers that don't have the snapshot block in their best chain.
     // We can't reorg to this chain due to missing undo data until validation completes,
     // so downloading blocks from it would be futile.
-    const CBlockIndex* snap_base{m_chainman.CurrentChainstate().SnapshotBase()};
-    if (snap_base && m_chainman.CurrentChainstate().m_assumeutxo == Assumeutxo::UNVALIDATED &&
+    const CBlockIndex* snap_base{m_chainstate->UnvalidatedSnapshotBase()};
+    if (snap_base &&
         state->pindexBestKnownBlock->GetAncestor(snap_base->nHeight) != snap_base) {
         LogDebug(BCLog::NET, "Not downloading blocks from peer=%d, which doesn't have the snapshot block in its best chain.\n", peer.m_id);
         return;
@@ -1603,7 +1603,7 @@ void PeerManagerImpl::FindNextBlocks(std::vector<const CBlockIndex*>& vBlocks, c
                 return;
             }
 
-            if (!CanServeWitnesses(peer) && DeploymentActiveAt(*pindex, m_chainman, Consensus::DEPLOYMENT_SEGWIT)) {
+            if (!CanServeWitnesses(peer) && m_chainstate->IsSegwitActiveAt(*pindex)) {
                 // We wouldn't download this block or its descendants from this peer.
                 return;
             }
@@ -2245,7 +2245,7 @@ void PeerManagerImpl::NewPoWValidBlock(const CBlockIndex *pindex, const std::sha
         return;
     m_highest_fast_announce = pindex->nHeight;
 
-    if (!DeploymentActiveAt(*pindex, m_chainman, Consensus::DEPLOYMENT_SEGWIT)) return;
+    if (!m_chainstate->IsSegwitActiveAt(*pindex)) return;
 
     uint256 hashBlock(pblock->GetHash());
     const std::shared_future<CSerializedNetMsg> lazy_ser{
@@ -2600,7 +2600,7 @@ void PeerManagerImpl::ProcessGetBlockData(CNode& pfrom, Peer& peer, const CInv& 
     } // release cs_main before calling ActivateBestChain
     if (need_activate_chain) {
         BlockValidationState state;
-        if (!m_chainman.ActiveChainstate().ActivateBestChain(state, a_recent_block)) {
+        if (!m_chainstate->ActivateBestChain(state, a_recent_block)) {
             LogDebug(BCLog::NET, "failed to activate chain (%s)\n", state.ToString());
         }
     }
@@ -3111,7 +3111,7 @@ void PeerManagerImpl::HeadersDirectFetchBlocks(CNode& pfrom, const Peer& peer, c
         while (pindexWalk && !m_chainstate->ActiveContains(*pindexWalk) && vToFetch.size() <= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
             if (!(pindexWalk->nStatus & BLOCK_HAVE_DATA) &&
                     !IsBlockRequested(pindexWalk->GetBlockHash()) &&
-                    (!DeploymentActiveAt(*pindexWalk, m_chainman, Consensus::DEPLOYMENT_SEGWIT) || CanServeWitnesses(peer))) {
+                    (!m_chainstate->IsSegwitActiveAt(*pindexWalk) || CanServeWitnesses(peer))) {
                 // We don't have this block, and it's not yet in flight.
                 vToFetch.push_back(pindexWalk);
             }
@@ -3740,7 +3740,7 @@ void PeerManagerImpl::ProcessCompactBlockTxns(CNode& pfrom, Peer& peer, const Bl
         // We should not have gotten this far in compact block processing unless it's attached to a known header
         const CBlockIndex* prev_block{Assume(m_chainstate->LookupBlockIndex(partialBlock.header.hashPrevBlock))};
         ReadStatus status = partialBlock.FillBlock(*pblock, block_transactions.txn,
-                                                   /*segwit_active=*/DeploymentActiveAfter(prev_block, m_chainman, Consensus::DEPLOYMENT_SEGWIT));
+                                                   /*segwit_active=*/m_chainstate->IsSegwitActiveAfter(prev_block));
         if (status == READ_STATUS_INVALID) {
             RemoveBlockRequest(block_transactions.blockhash, pfrom.GetId()); // Reset in-flight state in case Misbehaving does not result in a disconnect
             Misbehaving(peer, "invalid compact block/non-matching block transactions");
@@ -4519,7 +4519,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
                 a_recent_block = m_most_recent_block;
             }
             BlockValidationState state;
-            if (!m_chainman.ActiveChainstate().ActivateBestChain(state, a_recent_block)) {
+            if (!m_chainstate->ActivateBestChain(state, a_recent_block)) {
                 LogDebug(BCLog::NET, "failed to activate chain (%s)\n", state.ToString());
             }
         }
@@ -4527,7 +4527,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         LOCK(cs_main);
 
         // Find the last block the caller has in the main chain
-        const CBlockIndex* pindex = m_chainman.ActiveChainstate().FindForkInGlobalIndex(locator);
+        const CBlockIndex* pindex = m_chainstate->FindForkInGlobalIndex(locator);
 
         // Send the rest of the chain
         if (pindex)
@@ -4676,7 +4676,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         else
         {
             // Find the last block the caller has in the main chain
-            pindex = m_chainman.ActiveChainstate().FindForkInGlobalIndex(locator);
+            pindex = m_chainstate->FindForkInGlobalIndex(locator);
             if (pindex)
                 pindex = m_chainstate->ActiveNext(*pindex);
         }
@@ -4990,7 +4990,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
                 std::vector<CTransactionRef> dummy;
                 const CBlockIndex* prev_block{Assume(m_chainstate->LookupBlockIndex(cmpctblock.header.hashPrevBlock))};
                 status = tempBlock.FillBlock(*pblock, dummy,
-                                             /*segwit_active=*/DeploymentActiveAfter(prev_block, m_chainman, Consensus::DEPLOYMENT_SEGWIT));
+                                             /*segwit_active=*/m_chainstate->IsSegwitActiveAfter(prev_block));
                 if (status == READ_STATUS_OK) {
                     fBlockReconstructed = true;
                 }
@@ -5102,7 +5102,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
                 if (it != m_headers_presync_stats.end()) stats = it->second;
             }
             if (stats.second) {
-                m_chainman.ReportHeadersPresync(stats.second->first, stats.second->second);
+                m_chainstate->ReportHeadersPresync(stats.second->first, stats.second->second);
             }
         }
 
@@ -5126,7 +5126,7 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
         // Check for possible mutation if it connects to something we know so we can check for DEPLOYMENT_SEGWIT being active
         if (prev_block && IsBlockMutated(/*block=*/*pblock,
-                           /*check_witness_root=*/DeploymentActiveAfter(prev_block, m_chainman, Consensus::DEPLOYMENT_SEGWIT))) {
+                           /*check_witness_root=*/m_chainstate->IsSegwitActiveAfter(prev_block))) {
             LogDebug(BCLog::NET, "Received mutated block from peer=%d\n", peer.m_id);
             Misbehaving(peer, "mutated block");
             WITH_LOCK(cs_main, RemoveBlockRequest(pblock->GetHash(), peer.m_id));
@@ -6519,7 +6519,7 @@ bool PeerManagerImpl::SendMessages(CNode& node)
             // current chainstate first, to prioritize getting to network tip
             // before downloading historical blocks.
             FindNextBlocksToDownload(peer, get_inflight_budget(), vToDownload, staller);
-            auto historical_blocks{m_chainman.GetHistoricalBlockRange()};
+            auto historical_blocks{m_chainstate->GetHistoricalBlockRange()};
             if (historical_blocks && !IsLimitedPeer(peer)) {
                 // If the first needed historical block is not an ancestor of the last,
                 // we need to start requesting blocks from their last common ancestor.

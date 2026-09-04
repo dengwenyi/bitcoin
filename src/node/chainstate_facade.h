@@ -8,9 +8,11 @@
 #include <arith_uint256.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 class BlockValidationState;
@@ -50,6 +52,7 @@ public:
     virtual bool ReadBlock(CBlock& block, const FlatFilePos& position, const uint256& expected_hash) const = 0;
     virtual bool ReadBlock(CBlock& block, const CBlockIndex& block_index) const = 0;
 
+    /** Read-only chain view. Callers preserve the existing cs_main locking contract. */
     virtual const CBlockIndex* ActiveTip() const = 0;
     virtual int ActiveHeight() const = 0;
     virtual bool ActiveContains(const CBlockIndex& block_index) const = 0;
@@ -58,6 +61,16 @@ public:
     virtual arith_uint256 MinimumChainWork() const = 0;
     virtual const CBlockIndex* BestHeader() const = 0;
     virtual const CBlockIndex* EnsureBestHeader() = 0;
+
+    /** Return the active snapshot base only while its background validation is incomplete. */
+    virtual const CBlockIndex* UnvalidatedSnapshotBase() const = 0;
+    virtual bool IsSegwitActiveAt(const CBlockIndex& block_index) const = 0;
+    virtual bool IsSegwitActiveAfter(const CBlockIndex* previous_block) const = 0;
+    virtual bool ActivateBestChain(BlockValidationState& state,
+                                   const std::shared_ptr<const CBlock>& recent_block) = 0;
+    virtual const CBlockIndex* FindForkInGlobalIndex(const CBlockLocator& locator) const = 0;
+    virtual void ReportHeadersPresync(int64_t height, int64_t timestamp) = 0;
+    virtual std::optional<std::pair<const CBlockIndex*, const CBlockIndex*>> GetHistoricalBlockRange() const = 0;
 };
 
 std::unique_ptr<ChainstateFacade> MakeChainstateFacade(ChainstateManager& chainman);
