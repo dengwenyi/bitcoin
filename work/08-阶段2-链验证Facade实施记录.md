@@ -43,3 +43,26 @@
 ## 5. 下一切片
 
 继续将只读链视图和区块存储查询封装为窄方法，优先移除 `m_blockman`、active tip/chain 和 minimum chain work 的直接访问；随后迁移交易验证与 ActivateBestChain，最终删除 `PeerManagerImpl::m_chainman`。
+
+## 6. 第二切片：区块索引与存储端口
+
+facade 现已增加以下只读区块存储能力：
+
+- 按 hash 查询只读 `CBlockIndex`；
+- 查询 block import/index 是否仍在加载；
+- 查询 prune 模式及指定区块是否已裁剪；
+- 读取原始区块字节；
+- 按磁盘位置或区块索引反序列化区块。
+
+`net_processing.cpp` 中的 `m_chainman.m_blockman` 直接访问从 25 处调用降为 0；全部改由 facade 完成。总 `m_chainman` 文本引用从 119 降为 83，facade 调用增至 52。
+
+索引查询仍要求调用方持有 `cs_main`，因为返回的 `CBlockIndex*` 在锁外不能被任意消费。首次组合测试在新增专项用例中漏持该锁，Debug lock assertion 明确失败并导致测试超时；修正测试锁范围后重新编译，完整组合 42 项通过。裁剪判断则由适配器内部持锁，Peer 层不再访问 `ChainstateManager::GetMutex()`。
+
+第二切片验证结果：
+
+- 最小 `bitcoind` 编译和链接通过；
+- 四链启动、持久化和强制终止恢复通过；
+- V1/V2 同步、重组和交易中继通过；
+- facade、BlockManager、网络、BIP324、DoS 和验证组合共 42 项通过，退出码 0。
+
+下一切片迁移 active tip/chain、minimum chain work、best header 与部署状态查询。

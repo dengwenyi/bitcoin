@@ -8,6 +8,8 @@
 #include <primitives/block.h>
 #include <validation.h>
 
+#include <utility>
+
 namespace node {
 namespace {
 
@@ -40,6 +42,43 @@ public:
     bool IsInitialBlockDownload() const override
     {
         return m_chainman.IsInitialBlockDownload();
+    }
+
+    const CBlockIndex* LookupBlockIndex(const uint256& hash) const override
+    {
+        return m_chainman.m_blockman.LookupBlockIndex(hash);
+    }
+
+    bool IsLoadingBlocks() const override
+    {
+        return m_chainman.m_blockman.LoadingBlocks();
+    }
+
+    bool IsPruneMode() const override
+    {
+        return m_chainman.m_blockman.IsPruneMode();
+    }
+
+    bool IsBlockPruned(const CBlockIndex& block_index) const override
+    {
+        return WITH_LOCK(m_chainman.GetMutex(), return m_chainman.m_blockman.IsBlockPruned(block_index));
+    }
+
+    std::optional<std::vector<std::byte>> ReadRawBlock(const FlatFilePos& position) const override
+    {
+        auto block{m_chainman.m_blockman.ReadRawBlock(position)};
+        if (!block) return std::nullopt;
+        return std::move(*block);
+    }
+
+    bool ReadBlock(CBlock& block, const FlatFilePos& position, const uint256& expected_hash) const override
+    {
+        return m_chainman.m_blockman.ReadBlock(block, position, expected_hash);
+    }
+
+    bool ReadBlock(CBlock& block, const CBlockIndex& block_index) const override
+    {
+        return m_chainman.m_blockman.ReadBlock(block, block_index);
     }
 
 private:

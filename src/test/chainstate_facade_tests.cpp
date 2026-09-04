@@ -20,6 +20,10 @@ BOOST_AUTO_TEST_CASE(query_forwarding)
     const CBlockIndex* tip{WITH_LOCK(cs_main, return m_node.chainman->ActiveTip())};
     BOOST_REQUIRE(tip != nullptr);
     BOOST_CHECK(facade->GetLocator(tip).vHave == ::GetLocator(tip).vHave);
+    const CBlockIndex* looked_up{WITH_LOCK(cs_main, return facade->LookupBlockIndex(tip->GetBlockHash()))};
+    BOOST_CHECK_EQUAL(looked_up, tip);
+    BOOST_CHECK_EQUAL(facade->IsLoadingBlocks(), m_node.chainman->m_blockman.LoadingBlocks());
+    BOOST_CHECK_EQUAL(facade->IsPruneMode(), m_node.chainman->m_blockman.IsPruneMode());
 }
 
 BOOST_AUTO_TEST_SUITE_END()
