@@ -95,3 +95,17 @@
 - 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
 
 阶段 3 仍未完成。下一步继续收敛剩余会话锁域，然后提取 headers/block 下载调度状态。
+
+## 6. 第六切片：Peer 同步链视图
+
+新增独立 `node::PeerSyncState`，并让受 `cs_main` 保护的兼容结构 `CNodeState` 继承该状态。首批迁移四个 headers 链视图字段：peer 最佳已知块、最后未知块、最后共同块和已发送的最佳 header。字段名、默认值、指针身份和所有原读写点保持不变；下载窗口、in-flight 队列和 eviction 计时状态仍在兼容结构中，后续小步迁移。
+
+新增 `peer_sync_state_tests/default_chain_view`，验证所有指针为空且未知块 hash 为 null。验证结果：
+
+- 测试配置重新生成成功；最小 `bitcoind.exe`、`test_bitcoin.exe`、`fuzz.exe` 均重新编译并链接成功；
+- `peer_sync_state`、`peer_session`、compact block、headers sync、peer connection、peer eviction 和 peerman 定向 18 项通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 持久化、干净重启和强制终止恢复通过；
+- V1/V2 协商、101 块同步、103 高度重组和交易中继通过；
+- 六个受影响 fuzz harness 均以 EOF 空输入运行通过。
+
+阶段 3 仍未完成。下一切片继续把下载调度字段迁入 `PeerSyncState`。
