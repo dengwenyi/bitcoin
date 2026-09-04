@@ -5,6 +5,8 @@
 #ifndef BITCOIN_NODE_CHAINSTATE_FACADE_H
 #define BITCOIN_NODE_CHAINSTATE_FACADE_H
 
+#include <arith_uint256.h>
+
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -47,6 +49,15 @@ public:
     virtual std::optional<std::vector<std::byte>> ReadRawBlock(const FlatFilePos& position) const = 0;
     virtual bool ReadBlock(CBlock& block, const FlatFilePos& position, const uint256& expected_hash) const = 0;
     virtual bool ReadBlock(CBlock& block, const CBlockIndex& block_index) const = 0;
+
+    virtual const CBlockIndex* ActiveTip() const = 0;
+    virtual int ActiveHeight() const = 0;
+    virtual bool ActiveContains(const CBlockIndex& block_index) const = 0;
+    virtual const CBlockIndex* ActiveNext(const CBlockIndex& block_index) const = 0;
+    virtual const CBlockIndex* ActiveAtHeight(int height) const = 0;
+    virtual arith_uint256 MinimumChainWork() const = 0;
+    virtual const CBlockIndex* BestHeader() const = 0;
+    virtual const CBlockIndex* EnsureBestHeader() = 0;
 };
 
 std::unique_ptr<ChainstateFacade> MakeChainstateFacade(ChainstateManager& chainman);

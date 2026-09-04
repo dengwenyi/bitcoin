@@ -81,6 +81,49 @@ public:
         return m_chainman.m_blockman.ReadBlock(block, block_index);
     }
 
+    const CBlockIndex* ActiveTip() const override
+    {
+        return m_chainman.ActiveTip();
+    }
+
+    int ActiveHeight() const override
+    {
+        return m_chainman.ActiveChain().Height();
+    }
+
+    bool ActiveContains(const CBlockIndex& block_index) const override
+    {
+        return m_chainman.ActiveChain().Contains(block_index);
+    }
+
+    const CBlockIndex* ActiveNext(const CBlockIndex& block_index) const override
+    {
+        return m_chainman.ActiveChain().Next(block_index);
+    }
+
+    const CBlockIndex* ActiveAtHeight(int height) const override
+    {
+        return m_chainman.ActiveChain()[height];
+    }
+
+    arith_uint256 MinimumChainWork() const override
+    {
+        return m_chainman.MinimumChainWork();
+    }
+
+    const CBlockIndex* BestHeader() const override
+    {
+        return m_chainman.m_best_header;
+    }
+
+    const CBlockIndex* EnsureBestHeader() override
+    {
+        if (m_chainman.m_best_header == nullptr) {
+            m_chainman.m_best_header = m_chainman.ActiveTip();
+        }
+        return m_chainman.m_best_header;
+    }
+
 private:
     ChainstateManager& m_chainman;
 };

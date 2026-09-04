@@ -66,3 +66,20 @@ facade 现已增加以下只读区块存储能力：
 - facade、BlockManager、网络、BIP324、DoS 和验证组合共 42 项通过，退出码 0。
 
 下一切片迁移 active tip/chain、minimum chain work、best header 与部署状态查询。
+
+## 7. 第三切片：活动链与最佳头部查询
+
+facade 现已增加活动链 tip、高度、包含关系、后继索引、按高度索引、minimum chain work 和 best header 查询，并封装首次发送消息时 best header 的兼容初始化。`FindNextBlocks` 不再接收 `CChain*`，只接收是否需要检查活动链的布尔语义，再通过 facade 完成包含关系判断，避免将完整活动链对象暴露给 Peer 层。
+
+本切片将 `net_processing.cpp` 中 `m_chainman` 文本引用从 83 降为 21，facade 调用增至 106。剩余直接依赖集中在 assumeutxo 快照状态、SegWit 部署状态、交易与 package 验证、`ActivateBestChain`、fork 查询及历史区块范围；这些边界留给后续小步迁移，阶段 2 仍未完成。
+
+第三切片验证结果：
+
+- VS2022 Debug 最小 `bitcoind` 编译和链接通过；
+- 四链启动、regtest 持久化、干净重启和强制终止恢复通过；
+- 三节点 V1/V2 协商、101 块同步、竞争链重组和交易中继通过；
+- facade、BlockManager、网络、BIP324、DoS 和验证组合共 42 项通过，输出 `No errors detected`，退出码 0。
+
+新增 minimum chain work 断言首次使用 `BOOST_CHECK_EQUAL` 时，Boost 因 `arith_uint256` 没有可打印的流输出运算符而编译失败；断言改为布尔相等比较后重新编译并通过。该失败属于测试表达式兼容问题，没有修改生产语义。Windows Debug CRT 退出期报告仍与阶段 0 基线一致。
+
+下一切片将优先封装 assumeutxo 快照、SegWit 部署状态、best-chain 激活和 fork 查询，再单独处理交易与 package 验证端口。

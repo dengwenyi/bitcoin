@@ -24,6 +24,15 @@ BOOST_AUTO_TEST_CASE(query_forwarding)
     BOOST_CHECK_EQUAL(looked_up, tip);
     BOOST_CHECK_EQUAL(facade->IsLoadingBlocks(), m_node.chainman->m_blockman.LoadingBlocks());
     BOOST_CHECK_EQUAL(facade->IsPruneMode(), m_node.chainman->m_blockman.IsPruneMode());
+
+    LOCK(cs_main);
+    BOOST_CHECK_EQUAL(facade->ActiveTip(), m_node.chainman->ActiveTip());
+    BOOST_CHECK_EQUAL(facade->ActiveHeight(), m_node.chainman->ActiveChain().Height());
+    BOOST_CHECK(facade->ActiveContains(*tip));
+    BOOST_CHECK_EQUAL(facade->ActiveAtHeight(tip->nHeight), tip);
+    BOOST_CHECK(facade->MinimumChainWork() == m_node.chainman->MinimumChainWork());
+    BOOST_CHECK_EQUAL(facade->BestHeader(), m_node.chainman->m_best_header);
+    BOOST_CHECK_EQUAL(facade->EnsureBestHeader(), m_node.chainman->m_best_header);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
