@@ -161,3 +161,21 @@
 - Windows Debug CRT 退出期报告与阶段 0 基线一致，测试进程退出码仍为 0。
 
 阶段 3 的 peer 会话状态和 headers/block 下载调度状态已形成独立模块，剩余工作是建立可选交易/内存池路径的构建边界。
+
+## 10. 第十切片：交易中继会话状态归属
+
+新增 `node::PeerTxRelay` 和 `node::PeerTxRelayState`，把原来嵌套在 `net_processing.cpp::Peer` 中的交易中继状态移入 `btc_tx_relay`：BIP37 bloom filter、已知/待发交易 inventory、mempool 请求标志、发送计时与序列号、对端 fee filter，以及三组对应锁和可选所有权。`Peer` 通过组合 `PeerTxRelayState` 按需取得该能力，默认仍不创建交易中继状态；原初始化条件、返回指针生命周期和所有字段访问点保持不变。
+
+新实现文件只列入 `btc_tx_relay`，构建日志确认 `peer_tx_relay.cpp` 在该目标内编译；`btc_peer_protocol` 仅编译改造后的调用侧。新增 `peer_tx_relay_tests/optional_state`，验证默认无状态、按需创建、默认 relay/inventory/mempool/sequence/fee 状态，以及所有权返回的一致性。
+
+验证结果如下：
+
+- 最小、测试和 fuzz 三套 VS2022 Debug 配置重新生成成功；
+- `bitcoind.exe`、`test_bitcoin.exe`、`fuzz.exe` 均重新编译并链接成功；
+- 新专项以及 mempool、fee estimator、orphanage、private broadcast、RBF、交易下载、tx graph、package、reconciliation、tx request 和 tx validation 合计 51 项通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 三块持久化、干净重启和强制终止恢复通过；
+- 三节点 V1/V2 协商、101 块同步、103 高度竞争链重组和实际交易中继通过；
+- `txdownloadman`、`txgraph`、`p2p_private_broadcast`、`process_message`、`process_messages`、`cmpctblock` 六个 fuzz harness 均以 EOF 空输入运行通过；
+- Windows Debug CRT 退出期报告与阶段 0 基线一致，测试进程退出码仍为 0。
+
+该切片完成了交易中继会话状态的模块归属，但不把运行中的标准中继 composition 误报为可关闭交易路径。下一切片将固化 `btc_tx_relay` 的 `EXCLUDE_FROM_ALL` 可选目标属性、composition root 显式选择关系和独立目标构建验证。

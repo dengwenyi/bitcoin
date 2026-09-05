@@ -80,6 +80,7 @@ add_executable(test_bitcoin
   orphanage_tests.cpp
   pcp_tests.cpp
   peer_session_tests.cpp
+  peer_tx_relay_tests.cpp
   peer_sync_state_tests.cpp
   peerman_tests.cpp
   pmt_tests.cpp

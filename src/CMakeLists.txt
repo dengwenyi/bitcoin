@@ -255,6 +255,7 @@ target_link_libraries(btc_net_transport
 # consume these concrete types directly; keeping the implementation together in
 # one object target makes that dependency visible without changing behavior.
 add_library(btc_tx_relay OBJECT EXCLUDE_FROM_ALL
+  node/peer_tx_relay.cpp
   node/transaction.cpp
   node/txdownloadman_impl.cpp
   node/txorphanage.cpp
