@@ -4,6 +4,8 @@
 
 #include <node/peer_session.h>
 
+#include <headerssync.h>
+
 #include <utility>
 
 namespace node {
@@ -12,6 +14,8 @@ PeerSession::PeerSession(NodeId id, ServiceFlags our_services, bool is_inbound)
     : m_id{id}, m_our_services{our_services}, m_is_inbound{is_inbound}
 {
 }
+
+PeerSession::~PeerSession() = default;
 
 void PeerSession::MarkForDiscouragement()
 {

@@ -14,7 +14,10 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <vector>
+
+class HeadersSyncState;
 
 namespace node {
 
@@ -60,6 +63,7 @@ struct PeerSession {
     std::atomic<std::chrono::seconds> m_time_offset{std::chrono::seconds{0}};
 
     PeerSession(NodeId id, ServiceFlags our_services, bool is_inbound);
+    ~PeerSession();
 
     /** Mark this session for disconnect and address discouragement. */
     void MarkForDiscouragement();
@@ -85,6 +89,14 @@ struct PeerSession {
 
     bool HasGetDataRequests() const;
 
+    /** Run one operation while holding the low-work headers-sync lock. */
+    template <typename Callable>
+    void WithHeadersSync(Callable&& callback)
+    {
+        LOCK(m_headers_sync_mutex);
+        callback(m_headers_sync);
+    }
+
 private:
     Mutex m_misbehavior_mutex;
     bool m_should_discourage GUARDED_BY(m_misbehavior_mutex){false};
@@ -94,6 +106,9 @@ private:
 
     mutable Mutex m_getdata_requests_mutex;
     std::deque<CInv> m_getdata_requests GUARDED_BY(m_getdata_requests_mutex);
+
+    Mutex m_headers_sync_mutex;
+    std::unique_ptr<HeadersSyncState> m_headers_sync GUARDED_BY(m_headers_sync_mutex);
 };
 
 } // namespace node

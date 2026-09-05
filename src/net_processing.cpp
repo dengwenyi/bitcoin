@@ -315,12 +315,6 @@ struct Peer : node::PeerSession {
     /** Time of the last getheaders message to this peer */
     NodeClock::time_point m_last_getheaders_timestamp GUARDED_BY(NetEventsInterface::g_msgproc_mutex){};
 
-    /** Protects m_headers_sync **/
-    Mutex m_headers_sync_mutex;
-    /** Headers-sync state for this peer (eg for initial sync, or syncing large
-     * reorgs) **/
-    std::unique_ptr<HeadersSyncState> m_headers_sync PT_GUARDED_BY(m_headers_sync_mutex) GUARDED_BY(m_headers_sync_mutex) {};
-
     /** When to potentially disconnect peer for stalling headers download */
     std::chrono::microseconds m_headers_sync_timeout GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0us};
 
@@ -611,8 +605,8 @@ private:
      *              acceptance by the caller).
      */
     bool IsContinuationOfLowWorkHeadersSync(Peer& peer, CNode& pfrom,
-            std::vector<CBlockHeader>& headers)
-        EXCLUSIVE_LOCKS_REQUIRED(peer.m_headers_sync_mutex, !m_headers_presync_mutex, g_msgproc_mutex);
+            std::vector<CBlockHeader>& headers, std::unique_ptr<HeadersSyncState>& headers_sync)
+        EXCLUSIVE_LOCKS_REQUIRED(!m_headers_presync_mutex, g_msgproc_mutex);
     /** Check work on a headers chain to be processed, and if insufficient,
      * initiate our anti-DoS headers sync mechanism.
      *
@@ -627,7 +621,7 @@ private:
     bool TryLowWorkHeadersSync(Peer& peer, CNode& pfrom,
                                const CBlockIndex& chain_start_header,
                                std::vector<CBlockHeader>& headers)
-        EXCLUSIVE_LOCKS_REQUIRED(!peer.m_headers_sync_mutex, !m_peer_mutex, !m_headers_presync_mutex, g_msgproc_mutex);
+        EXCLUSIVE_LOCKS_REQUIRED(!m_peer_mutex, !m_headers_presync_mutex, g_msgproc_mutex);
 
     /** Return true if the given header is an ancestor of
      *  m_chainstate->BestHeader() or our current tip */
@@ -1794,12 +1788,9 @@ bool PeerManagerImpl::GetNodeStateStats(NodeId nodeid, CNodeStateStats& stats) c
     stats.m_addr_processed = peer->m_addr_processed.load();
     stats.m_addr_rate_limited = peer->m_addr_rate_limited.load();
     stats.m_addr_relay_enabled = peer->m_addr_relay_enabled.load();
-    {
-        LOCK(peer->m_headers_sync_mutex);
-        if (peer->m_headers_sync) {
-            stats.presync_height = peer->m_headers_sync->GetPresyncHeight();
-        }
-    }
+    peer->WithHeadersSync([&](const auto& headers_sync) {
+        if (headers_sync) stats.presync_height = headers_sync->GetPresyncHeight();
+    });
     stats.time_offset = peer->m_time_offset;
 
     return true;
@@ -2778,14 +2769,14 @@ bool PeerManagerImpl::CheckHeadersAreContinuous(const std::vector<CBlockHeader>&
     return true;
 }
 
-bool PeerManagerImpl::IsContinuationOfLowWorkHeadersSync(Peer& peer, CNode& pfrom, std::vector<CBlockHeader>& headers)
+bool PeerManagerImpl::IsContinuationOfLowWorkHeadersSync(Peer& peer, CNode& pfrom, std::vector<CBlockHeader>& headers, std::unique_ptr<HeadersSyncState>& headers_sync)
 {
-    if (peer.m_headers_sync) {
-        auto result = peer.m_headers_sync->ProcessNextHeaders(headers, headers.size() == m_opts.max_headers_result);
+    if (headers_sync) {
+        auto result = headers_sync->ProcessNextHeaders(headers, headers.size() == m_opts.max_headers_result);
         // If it is a valid continuation, we should treat the existing getheaders request as responded to.
         if (result.success) peer.m_last_getheaders_timestamp = {};
         if (result.request_more) {
-            auto locator = peer.m_headers_sync->NextHeadersRequestLocator();
+            auto locator = headers_sync->NextHeadersRequestLocator();
             // If we were instructed to ask for a locator, it should not be empty.
             Assume(!locator.vHave.empty());
             // We can only be instructed to request more if processing was successful.
@@ -2800,8 +2791,8 @@ bool PeerManagerImpl::IsContinuationOfLowWorkHeadersSync(Peer& peer, CNode& pfro
             }
         }
 
-        if (peer.m_headers_sync->GetState() == HeadersSyncState::State::FINAL) {
-            peer.m_headers_sync.reset(nullptr);
+        if (headers_sync->GetState() == HeadersSyncState::State::FINAL) {
+            headers_sync.reset(nullptr);
 
             // Delete this peer's entry in m_headers_presync_stats.
             // If this is m_headers_presync_bestpeer, it will be replaced later
@@ -2811,10 +2802,10 @@ bool PeerManagerImpl::IsContinuationOfLowWorkHeadersSync(Peer& peer, CNode& pfro
         } else {
             // Build statistics for this peer's sync.
             HeadersPresyncStats stats;
-            stats.first = peer.m_headers_sync->GetPresyncWork();
-            if (peer.m_headers_sync->GetState() == HeadersSyncState::State::PRESYNC) {
-                stats.second = {peer.m_headers_sync->GetPresyncHeight(),
-                                peer.m_headers_sync->GetPresyncTime()};
+            stats.first = headers_sync->GetPresyncWork();
+            if (headers_sync->GetState() == HeadersSyncState::State::PRESYNC) {
+                stats.second = {headers_sync->GetPresyncHeight(),
+                                headers_sync->GetPresyncTime()};
             }
 
             // Update statistics in stats.
@@ -2885,25 +2876,26 @@ bool PeerManagerImpl::TryLowWorkHeadersSync(Peer& peer, CNode& pfrom, const CBlo
             // this logic in that case. So even if the first header in this set
             // of headers is known, some header in this set must be new, so
             // advancing to the first unknown header would be a small effect.
-            LOCK(peer.m_headers_sync_mutex);
-            try {
-                peer.m_headers_sync.reset(new HeadersSyncState(peer.m_id, m_chainparams.GetConsensus(),
-                    m_chainparams.HeadersSync(), chain_start_header, minimum_chain_work));
-            } catch (const HeadersSyncState::SystemClockError& e) {
-                // The chain state loading logic performs an earlier check to
-                // verify that the tip of the locally stored chain is <=
-                // system clock + MAX_FUTURE_BLOCK_TIME.
-                // But if we have no pre-existing chain state we might get here.
-                const auto msg{strprintf("Failure when attempting to initiate headers sync: %s", e.what())};
-                std::cerr << msg << std::endl;
-                LogError("%s", msg);
-                std::abort();
-            }
+            peer.WithHeadersSync([&](auto& headers_sync) {
+                try {
+                    headers_sync = std::make_unique<HeadersSyncState>(peer.m_id, m_chainparams.GetConsensus(),
+                        m_chainparams.HeadersSync(), chain_start_header, minimum_chain_work);
+                } catch (const HeadersSyncState::SystemClockError& e) {
+                    // The chain state loading logic performs an earlier check to
+                    // verify that the tip of the locally stored chain is <=
+                    // system clock + MAX_FUTURE_BLOCK_TIME.
+                    // But if we have no pre-existing chain state we might get here.
+                    const auto msg{strprintf("Failure when attempting to initiate headers sync: %s", e.what())};
+                    std::cerr << msg << std::endl;
+                    LogError("%s", msg);
+                    std::abort();
+                }
 
-            // Now a HeadersSyncState object for tracking this synchronization
-            // is created, process the headers using it as normal. Failures are
-            // handled inside of IsContinuationOfLowWorkHeadersSync.
-            (void)IsContinuationOfLowWorkHeadersSync(peer, pfrom, headers);
+                // Now a HeadersSyncState object for tracking this synchronization
+                // is created, process the headers using it as normal. Failures are
+                // handled inside of IsContinuationOfLowWorkHeadersSync.
+                (void)IsContinuationOfLowWorkHeadersSync(peer, pfrom, headers, headers_sync);
+            });
         } else {
             LogDebug(BCLog::NET, "Ignoring low-work chain (height=%u) from peer=%d\n", chain_start_header.nHeight + headers.size(), pfrom.GetId());
         }
@@ -3076,12 +3068,13 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
         // If we were in the middle of headers sync, receiving an empty headers
         // message suggests that the peer suddenly has nothing to give us
         // (perhaps it reorged to our chain). Clear download state for this peer.
-        LOCK(peer.m_headers_sync_mutex);
-        if (peer.m_headers_sync) {
-            peer.m_headers_sync.reset(nullptr);
-            LOCK(m_headers_presync_mutex);
-            m_headers_presync_stats.erase(pfrom.GetId());
-        }
+        peer.WithHeadersSync([&](auto& headers_sync) {
+            if (headers_sync) {
+                headers_sync.reset(nullptr);
+                LOCK(m_headers_presync_mutex);
+                m_headers_presync_stats.erase(pfrom.GetId());
+            }
+        });
         // A headers message with no headers cannot be an announcement, so assume
         // it is a response to our last getheaders request, if there is one.
         peer.m_last_getheaders_timestamp = {};
@@ -3111,10 +3104,8 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
 
     // If we're in the middle of headers sync, let it do its magic.
     bool have_headers_sync = false;
-    {
-        LOCK(peer.m_headers_sync_mutex);
-
-        already_validated_work = IsContinuationOfLowWorkHeadersSync(peer, pfrom, headers);
+    peer.WithHeadersSync([&](auto& headers_sync) {
+        already_validated_work = IsContinuationOfLowWorkHeadersSync(peer, pfrom, headers, headers_sync);
 
         // The headers we passed in may have been:
         // - untouched, perhaps if no headers-sync was in progress, or some
@@ -3126,12 +3117,9 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
         //   during the REDOWNLOAD phase of a low-work headers sync.
         // So just check whether we still have headers that we need to process,
         // or not.
-        if (headers.empty()) {
-            return;
-        }
-
-        have_headers_sync = !!peer.m_headers_sync;
-    }
+        have_headers_sync = !!headers_sync;
+    });
+    if (headers.empty()) return;
 
     // Do these headers connect to something in our block index?
     const CBlockIndex *chain_start_header{WITH_LOCK(::cs_main, return m_chainstate->LookupBlockIndex(headers[0].hashPrevBlock))};

@@ -143,3 +143,21 @@
 - Windows Debug CRT 退出期报告与阶段 0 基线一致，测试进程退出码仍为 0。
 
 阶段 3 仍未完成。下一切片处理 `Peer` 中独立的 headers-sync 锁域；随后再建立可选交易/内存池路径的构建边界。
+
+## 9. 第九切片：低工作量 headers-sync 锁域
+
+将每个 peer 的 `HeadersSyncState` 所有权及其专用互斥量一起移入 `PeerSession`。会话模块通过 `WithHeadersSync` 提供闭包式访问：调用者只能在内部持锁期间使用 `unique_ptr`，不能直接取得 mutex，也不能在解锁后保存内部引用。由于头文件只前置声明 `HeadersSyncState`，`PeerSession` 的析构函数改为在 `peer_session.cpp` 中定义，从而保持实现类型边界。
+
+`PeerManagerImpl` 仍负责低工作量 header 链的协议决策、后续 `getheaders` 请求以及跨 peer 的 presync 统计；本切片仅改变状态所有权和加锁入口。创建、延续、结束、空响应清理与 RPC 统计读取均改为闭包内访问。原来在持锁块内直接 `return` 的 headers 为空路径改为先结束闭包、释放锁，再执行相同早退，后续业务顺序不变。`net_processing.cpp` 已不再直接声明、加锁或读写该专用状态。
+
+专项测试增加默认 headers-sync 指针为空的断言。验证结果如下：
+
+- 最小、测试和 fuzz 三套 VS2022 Debug 配置重新生成成功；
+- `bitcoind.exe`、`test_bitcoin.exe`、`fuzz.exe` 均重新编译并链接成功；
+- `peer_session`、headers sync、compact block、peer connection、peer eviction 和 peerman 定向 17 项通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 三块持久化、干净重启和强制终止恢复通过；
+- 三节点 V1/V2 协商、101 块同步、103 高度竞争链重组和交易中继通过；
+- `headers_sync_state` 以及六个 P2P 相关 fuzz harness 均以 EOF 空输入运行通过；
+- Windows Debug CRT 退出期报告与阶段 0 基线一致，测试进程退出码仍为 0。
+
+阶段 3 的 peer 会话状态和 headers/block 下载调度状态已形成独立模块，剩余工作是建立可选交易/内存池路径的构建边界。

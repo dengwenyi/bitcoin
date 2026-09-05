@@ -69,6 +69,10 @@ BOOST_AUTO_TEST_CASE(immutable_identity)
     });
     BOOST_CHECK(!outbound.HasGetDataRequests());
 
+    outbound.WithHeadersSync([](const auto& headers_sync) {
+        BOOST_CHECK(!headers_sync);
+    });
+
     const node::PeerSession inbound{id + 1, NODE_NONE, /*is_inbound=*/true};
     BOOST_CHECK_EQUAL(inbound.m_id, id + 1);
     BOOST_CHECK(inbound.m_our_services == NODE_NONE);
