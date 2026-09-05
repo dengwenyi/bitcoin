@@ -33,9 +33,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "MSBuild failed with exit code $LASTEXITCODE"
 }
 
-$artifactName = if ($Target) { "$Target.exe" } else { 'bitcoind.exe' }
-$binary = Join-Path (Join-Path (Join-Path $repoRoot $BuildDirectory) 'bin') "$Configuration\$artifactName"
-if (-not (Test-Path -LiteralPath $binary)) {
-    throw "Expected build artifact was not produced: $binary"
+$artifact = if (-not $Target) {
+    Join-Path (Join-Path (Join-Path $repoRoot $BuildDirectory) 'bin') "$Configuration\bitcoind.exe"
+} elseif ($Target -eq 'btc_tx_relay') {
+    Join-Path (Join-Path (Join-Path (Join-Path $repoRoot $BuildDirectory) 'src') 'btc_tx_relay.dir') "$Configuration\btc_tx_relay.lib"
+} else {
+    Join-Path (Join-Path (Join-Path $repoRoot $BuildDirectory) 'bin') "$Configuration\$Target.exe"
 }
-Write-Host "Built $binary"
+if (-not (Test-Path -LiteralPath $artifact)) {
+    throw "Expected build artifact was not produced: $artifact"
+}
+Write-Host "Built $artifact"

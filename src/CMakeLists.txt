@@ -413,6 +413,17 @@ function(assert_target_does_not_link target)
   endforeach()
 endfunction()
 
+function(assert_target_excluded_from_all target)
+  get_target_property(target_excluded ${target} EXCLUDE_FROM_ALL)
+  if(NOT target_excluded)
+    message(FATAL_ERROR
+      "Layering violation: optional target ${target} must remain EXCLUDE_FROM_ALL"
+    )
+  endif()
+endfunction()
+
+assert_target_excluded_from_all(btc_tx_relay)
+
 assert_target_does_not_link(btc_net_transport
   btc_chainstate btc_node_optional btc_peer_protocol btc_tx_relay
 )

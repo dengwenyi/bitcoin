@@ -179,3 +179,28 @@
 - Windows Debug CRT 退出期报告与阶段 0 基线一致，测试进程退出码仍为 0。
 
 该切片完成了交易中继会话状态的模块归属，但不把运行中的标准中继 composition 误报为可关闭交易路径。下一切片将固化 `btc_tx_relay` 的 `EXCLUDE_FROM_ALL` 可选目标属性、composition root 显式选择关系和独立目标构建验证。
+
+## 11. 第十一切片：可选交易中继目标门禁
+
+在 CMake 配置期新增 `assert_target_excluded_from_all`，强制 `btc_tx_relay` 保持 `EXCLUDE_FROM_ALL`。结合既有反向链接门禁，当前构建关系为：
+
+- `btc_tx_relay` 不属于默认 `ALL`，可以被单独选择和构建；
+- `btc_peer_protocol` 不声明到 `btc_tx_relay` 的目标链接；
+- 标准中继 `bitcoin_node` composition root 显式依赖并链接 `btc_tx_relay`，因此目标选择是可见且可检查的；
+- 如果后续误删 `EXCLUDE_FROM_ALL`，CMake 配置会立即失败，而不是静默扩大默认构建面。
+
+VS2022 构建脚本增加 `btc_tx_relay` 对象库产物识别，能够用同一入口单独构建并核验 `src/btc_tx_relay.dir/Debug/btc_tx_relay.lib`，不再错误假设所有显式目标都生成 `.exe`。
+
+验证结果如下：
+
+- 三套 VS2022 Debug 配置均通过新增 CMake 门禁并生成成功；一次并行复核在 vcpkg toolchain 层发生缓存争用，改为串行后最小、测试、fuzz 三套均明确退出 0，排除了门禁逻辑失败；
+- `btc_tx_relay` 独立目标编译并生成对象库；标准 `bitcoind.exe`、`test_bitcoin.exe`、`fuzz.exe` 三个组合目标也均重新链接成功；
+- 交易中继相关 51 项测试通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 持久化、干净重启和强制终止恢复通过；
+- 三节点 V1/V2 协商、101 块同步、103 高度竞争链重组和交易中继通过；
+- 六个交易/P2P 相关 fuzz harness 均以 EOF 空输入运行通过；
+- Windows Debug CRT 退出期报告与阶段 0 基线一致，测试进程退出码仍为 0。
+
+这里的“可选”严格指构建目标边界：当前项目选择的是最小标准中继全节点，composition root 仍显式装配 mempool 和交易中继。本切片不宣称已经存在可运行的 block-only 新装配，也不宣称 `net_processing.cpp` 内所有交易协议分支已经物理迁出。
+
+至此，方案阶段 3 的三个准入条件均已满足：per-peer 会话状态已提取，headers/block 下载状态与锁域已独立，交易中继会话状态归入可选目标且由标准中继装配显式选择。下一阶段开始提取连接与 transport 的窄 channel，同时保持现有 V1/V2 实现和字节行为。
