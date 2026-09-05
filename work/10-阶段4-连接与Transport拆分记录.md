@@ -31,3 +31,23 @@
 ### 1.4 状态
 
 本切片建立了独立 channel 类型并让连接对象依赖该窄契约，但 socket 发送循环和消息队列仍在 `CConnman`/`CNode` 中，transport 工厂也仍是 `net.cpp` 的本地函数。阶段 4 尚未完成；下一步将把 V1/V2 channel 创建从 `CNode` 构造细节提取为独立工厂，再逐步收窄 socket 与 transport 的交界。
+
+## 2. 第二切片：Transport channel 工厂
+
+新增 `node::MakeTransportChannel` 工厂，将 V1/V2 选择、V2 inbound/outbound initiating 方向和具体实现创建从 `net.cpp` 的局部函数移入独立模块。`CNode` 构造函数现在只向工厂传入 node id、是否启用 V2 以及是否 inbound，并接收 `unique_ptr<TransportChannel>`；V1/V2 构造参数和值保持不变。
+
+工厂头只依赖 channel 契约和整数 node id，不包含 `net.h`。具体实现文件才包含 `net.h` 并创建 `V1Transport`/`V2Transport`，因此实现选择集中在 transport 目标内，连接对象不再自行认识两个实现类。新实现文件归属 `btc_net_transport`。
+
+新增 `transport_factory_tests/selects_channel_protocol`，验证关闭 V2 时得到可观察类型 V1，开启 V2 的 inbound/outbound channel 初始状态均为 `DETECTING`。首轮编译发现 `NodeId` 在当前 31.99 中仍由 `net.h`/部分节点头局部声明，工厂头仅包含 `protocol.h` 时无法解析。最终契约改为语义等价的 `int64_t node_id`，避免为了一个标识值反向包含完整 `net.h`；修复后三套目标全部通过。
+
+验证结果：
+
+- 最小、测试和 fuzz 三套 VS2022 Debug 配置重新生成成功；
+- `transport_factory.cpp` 在 `btc_net_transport` 内编译，`bitcoind.exe`、`test_bitcoin.exe` 和 `fuzz.exe` 均链接成功；
+- 工厂新用例与 `net`、BIP324、DoS、peer connection、peerman 合计 28 项通过，输出 `No errors detected`，退出码 0；
+- 四链启动、regtest 三块持久化、干净重启和强制终止恢复通过；
+- 三节点 V1/V2 实际协商、101 块同步、103 高度竞争链重组和交易中继通过；
+- `p2p_transport_serialization`、`p2p_handshake`、`process_message`、`process_messages` 四个 fuzz harness 均以 EOF 空输入运行通过；
+- Windows Debug CRT 退出期报告与阶段 0 基线一致，测试进程退出码仍为 0。
+
+阶段 4 尚未完成。下一切片将把 socket 写入结果转换为窄的 channel pump 结果，继续保持 `CConnman` 管理 socket/连接生命周期、transport 只管理协议字节状态的单向关系。

@@ -236,6 +236,7 @@ add_library(btc_net_transport OBJECT EXCLUDE_FROM_ALL
   i2p.cpp
   mapport.cpp
   net.cpp
+  node/transport_factory.cpp
   torcontrol.cpp
 )
 target_link_libraries(btc_net_transport

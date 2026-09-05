@@ -120,6 +120,7 @@ add_executable(test_bitcoin
   threadpool_tests.cpp
   timeoffsets_tests.cpp
   torcontrol_tests.cpp
+  transport_factory_tests.cpp
   transaction_tests.cpp
   translation_tests.cpp
   txdownload_tests.cpp

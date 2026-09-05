@@ -25,6 +25,7 @@
 #include <netbase.h>
 #include <node/eviction.h>
 #include <node/interface_ui.h>
+#include <node/transport_factory.h>
 #include <protocol.h>
 #include <random.h>
 #include <scheduler.h>
@@ -4061,15 +4062,6 @@ ServiceFlags CConnman::GetLocalServices() const
     return m_local_services;
 }
 
-static std::unique_ptr<Transport> MakeTransport(NodeId id, bool use_v2transport, bool inbound) noexcept
-{
-    if (use_v2transport) {
-        return std::make_unique<V2Transport>(id, /*initiating=*/!inbound);
-    } else {
-        return std::make_unique<V1Transport>(id);
-    }
-}
-
 CNode::CNode(NodeId idIn,
              std::shared_ptr<Sock> sock,
              const CAddress& addrIn,
@@ -4081,7 +4073,7 @@ CNode::CNode(NodeId idIn,
              bool inbound_onion,
              uint64_t network_key,
              CNodeOptions&& node_opts)
-    : m_transport{MakeTransport(idIn, node_opts.use_v2transport, conn_type_in == ConnectionType::INBOUND)},
+    : m_transport{node::MakeTransportChannel(idIn, node_opts.use_v2transport, conn_type_in == ConnectionType::INBOUND)},
       m_permission_flags{node_opts.permission_flags},
       m_sock{sock},
       m_connected{NodeClock::now()},
