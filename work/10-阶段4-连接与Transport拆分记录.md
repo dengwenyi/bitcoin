@@ -51,3 +51,22 @@
 - Windows Debug CRT 退出期报告与阶段 0 基线一致，测试进程退出码仍为 0。
 
 阶段 4 尚未完成。下一切片将把 socket 写入结果转换为窄的 channel pump 结果，继续保持 `CConnman` 管理 socket/连接生命周期、transport 只管理协议字节状态的单向关系。
+
+## 3. 阶段 4 corpus 差分门禁与结论
+
+复核后没有继续把 socket 写入循环迁入 channel：当前 `CConnman::SocketSendData` 负责 socket、`MSG_MORE`、连接计数和 backpressure，`TransportChannel` 只负责协议消息与线缆字节窗口；将 socket 结果塞入 channel 反而会让上层连接生命周期反向进入 transport。现边界已经满足单向依赖：连接层持有窄 channel、channel 不理解 socket/endpoint/Peer/链或交易业务，V1/V2 具体选择由独立工厂完成。
+
+此前 EOF fuzz 只证明 harness 可启动，不能替代方案要求的 seed corpus 回归。本次按仓库 `doc/fuzzing.md` 指向的官方 `bitcoin-core/qa-assets` 浅克隆并 sparse checkout 四个相关 corpus，临时目录未纳入提交。验证快照：
+
+```text
+qa-assets commit: b7a26ef9033e612f51b52b66db147a20700c8142
+p2p_transport_serialization: 230 inputs
+p2p_handshake:               1343 inputs
+process_message:             2581 inputs
+process_messages:            4196 inputs
+total:                       8350 inputs
+```
+
+四个目标使用当前 VS2022 Debug `fuzz.exe` 回放全部输入并退出 0。前三个目标在一个 180 秒总命令中分别于 6、10、30 秒完成；总命令到达工具上限时，最后的 `process_messages` 尚未完成且无 crash。将其单独重跑后于 172 秒完成 4,196 个输入并退出 0，因此工具总时限不计为 fuzz 失败。
+
+阶段 4 的三项准入条件均已满足：保留原 V1/V2 `Transport` 实现；`CNode`/`CConnman` 通过独立 `TransportChannel` 和工厂依赖具体实现；现有 BIP324/net 测试、实际 V1/V2 网络行为以及官方 transport/P2P corpus 均通过。下一阶段进入最小 composition root，逐步停止把 RPC、index、miner 等上层对象链接进最终最小目标。
