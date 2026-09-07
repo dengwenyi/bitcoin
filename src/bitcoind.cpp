@@ -182,8 +182,13 @@ static bool AppInit(NodeContext& node)
     std::any context{&node};
     try
     {
-        // -server defaults to true for bitcoind but not for the GUI so do this here
+        // The compatibility daemon exposes RPC by default. The minimal daemon
+        // deliberately has no RPC/HTTP implementation in its link graph.
+#ifdef BITCOIN_MINIMAL_NODE
+        args.SoftSetBoolArg("-server", false);
+#else
         args.SoftSetBoolArg("-server", true);
+#endif
         // Set this early so that parameter interactions go to console
         InitLogging(args);
         InitParameterInteraction(args);

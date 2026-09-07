@@ -293,19 +293,21 @@ void Interrupt(NodeContext& node)
 #endif
     // Wake any threads that may be waiting for the tip to change.
     if (node.notifications) WITH_LOCK(node.notifications->m_tip_block_mutex, node.notifications->m_tip_block_cv.notify_all());
+#ifndef BITCOIN_MINIMAL_NODE
     InterruptHTTPServer();
     InterruptHTTPRPC();
     InterruptRPC();
     InterruptREST();
+#endif
     if (node.tor_controller) {
         node.tor_controller->Interrupt();
     }
     InterruptMapPort();
     if (node.connman)
         node.connman->Interrupt();
-    for (auto* index : node.indexes) {
-        index->Interrupt();
-    }
+#ifndef BITCOIN_MINIMAL_NODE
+    for (auto* index : node.indexes) index->Interrupt();
+#endif
 }
 
 void Shutdown(NodeContext& node)
@@ -323,10 +325,12 @@ void Shutdown(NodeContext& node)
     util::ThreadRename("shutoff");
     if (node.mempool) node.mempool->AddTransactionsUpdated(1);
 
+#ifndef BITCOIN_MINIMAL_NODE
     StopHTTPRPC();
     StopREST();
     StopRPC();
     StopHTTPServer();
+#endif
     for (auto& client : node.chain_clients) {
         try {
             client->stop();
@@ -367,12 +371,14 @@ void Shutdown(NodeContext& node)
 
     // Drop transactions we were still watching, record fee estimations and unregister
     // fee estimator from validation interface.
+#ifndef BITCOIN_MINIMAL_NODE
     if (node.fee_estimator_man) {
         node.fee_estimator_man->ShutdownFlush();
         if (node.validation_signals) {
             node.validation_signals->UnregisterValidationInterface(node.fee_estimator_man.get());
         }
     }
+#endif
 
     // FlushStateToDisk generates a ChainStateFlushed callback, which we should avoid missing
     if (node.chainman) {
@@ -388,6 +394,7 @@ void Shutdown(NodeContext& node)
     // CValidationInterface callbacks, flush them...
     if (node.validation_signals) node.validation_signals->FlushBackgroundCallbacks();
 
+#ifndef BITCOIN_MINIMAL_NODE
     // Stop and delete all indexes only after flushing background callbacks.
     for (auto* index : node.indexes) index->Stop();
     if (g_txindex) g_txindex.reset();
@@ -395,6 +402,7 @@ void Shutdown(NodeContext& node)
     if (g_coin_stats_index) g_coin_stats_index.reset();
     DestroyAllBlockFilterIndexes();
     node.indexes.clear(); // all instances are nullptr now
+#endif
 
     // Any future callbacks will be dropped. This should absolutely be safe - if
     // missing a callback results in an unrecoverable situation, unclean shutdown
@@ -784,6 +792,9 @@ static void StartupNotify(const ArgsManager& args)
 
 static bool AppInitServers(NodeContext& node)
 {
+#ifdef BITCOIN_MINIMAL_NODE
+    return InitError(_("The minimal daemon does not provide RPC, REST, or HTTP services."));
+#else
     const ArgsManager& args = *Assert(node.args);
     if (!InitHTTPServer()) {
         return false;
@@ -795,6 +806,7 @@ static bool AppInitServers(NodeContext& node)
     if (args.GetBoolArg("-rest", DEFAULT_REST_ENABLE)) StartREST(&node);
     StartHTTPServer();
     return true;
+#endif
 }
 
 // Parameter interaction based on rules
@@ -1006,6 +1018,16 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         return InitError(strprintf(_("Specified blocks directory \"%s\" does not exist."), args.GetArg("-blocksdir", "")));
     }
 
+#ifdef BITCOIN_MINIMAL_NODE
+    if (args.GetBoolArg("-server", false) || args.GetBoolArg("-rest", DEFAULT_REST_ENABLE) ||
+        args.GetBoolArg("-txindex", DEFAULT_TXINDEX) ||
+        args.GetBoolArg("-txospenderindex", DEFAULT_TXOSPENDERINDEX) ||
+        args.GetBoolArg("-coinstatsindex", DEFAULT_COINSTATSINDEX) ||
+        args.GetArg("-blockfilterindex", DEFAULT_BLOCKFILTERINDEX) != "0" ||
+        args.GetBoolArg("-peerblockfilters", DEFAULT_PEERBLOCKFILTERS)) {
+        return InitError(_("RPC, REST, and optional indexes are unavailable in bitcoind_min."));
+    }
+#else
     // parse and validate enabled filter types
     std::string blockfilterindex_value = args.GetArg("-blockfilterindex", DEFAULT_BLOCKFILTERINDEX);
     if (blockfilterindex_value == "" || blockfilterindex_value == "1") {
@@ -1021,11 +1043,6 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         }
     }
 
-    // Signal NODE_P2P_V2 if BIP324 v2 transport is enabled.
-    if (args.GetBoolArg("-v2transport", DEFAULT_V2_TRANSPORT)) {
-        g_local_services = ServiceFlags(g_local_services | NODE_P2P_V2);
-    }
-
     // Signal NODE_COMPACT_FILTERS if peerblockfilters and basic filters index are both enabled.
     if (args.GetBoolArg("-peerblockfilters", DEFAULT_PEERBLOCKFILTERS)) {
         if (!g_enabled_filter_types.contains(BlockFilterType::BASIC)) {
@@ -1033,6 +1050,13 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         }
 
         g_local_services = ServiceFlags(g_local_services | NODE_COMPACT_FILTERS);
+    }
+#endif
+
+    // Signal NODE_P2P_V2 if BIP324 v2 transport is enabled. This is a core
+    // transport capability and is independent of optional compact indexes.
+    if (args.GetBoolArg("-v2transport", DEFAULT_V2_TRANSPORT)) {
+        g_local_services = ServiceFlags(g_local_services | NODE_P2P_V2);
     }
 
     if (args.GetIntArg("-prune", 0)) {
@@ -1075,6 +1099,7 @@ bool AppInitParameterInteraction(const ArgsManager& args)
                              ? MAX_PRIVATE_BROADCAST_CONNECTIONS
                              : 0};
 
+#ifndef BITCOIN_MINIMAL_NODE
     // HTTP server listen sockets: by default two (IPv4 and IPv6 loopback), or one per -rpcbind entry
     int num_rpc_bind = std::max(args.GetArgs("-rpcbind").size(), size_t(2));
     // HTTP server connected client sockets
@@ -1086,6 +1111,10 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         num_rpc_bind = 0;
         user_rpc_max_connections = 0;
     }
+#else
+    const int num_rpc_bind{0};
+    const int user_rpc_max_connections{0};
+#endif
 
     // Reserve enough FDs to account for the bare minimum, plus any manual connections, plus the bound interfaces.
     // Every element is an int >= 0 so summing in int64_t cannot overflow.
@@ -1150,10 +1179,12 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         return InitError(Untranslated("peertimeout must be a positive integer."));
     }
 
+#ifndef BITCOIN_MINIMAL_NODE
     auto mining_result{node::ReadMiningArgs(args)};
     if (!mining_result) {
         return InitError(util::ErrorString(mining_result));
     }
+#endif
 
     nBytesPerSigOp = args.GetIntArg("-bytespersigop", nBytesPerSigOp);
 
@@ -1279,10 +1310,14 @@ bool AppInitLockDirectories()
 
 bool AppInitInterfaces(NodeContext& node)
 {
+#ifdef BITCOIN_MINIMAL_NODE
+    (void)node;
+#else
     node.chain = interfaces::MakeChain(node);
     // Specify wait_loaded=false so internal mining interface can be initialized
     // on early startup and does not need to be tied to chainstate loading.
     node.mining = interfaces::MakeMining(node, /*wait_loaded=*/false);
+#endif
     return true;
 }
 
@@ -1396,9 +1431,11 @@ static ChainstateLoadResult InitAndLoadChainstate(
     if (!mempool_error.empty()) {
         return {ChainstateLoadStatus::FAILURE_FATAL, mempool_error};
     }
+#ifndef BITCOIN_MINIMAL_NODE
     auto mining_args{node::ReadMiningArgs(args)};
     Assert(mining_args); // no error can happen, already checked in AppInitParameterInteraction
     node.mining_args = std::move(*mining_args);
+#endif
     LogInfo("* Using %.1f MiB for in-memory UTXO set (plus up to %.1f MiB of unused mempool space)",
             cache_sizes.coins / double(1_MiB),
             mempool_opts.max_size_bytes / double(1_MiB));
@@ -1445,6 +1482,7 @@ static ChainstateLoadResult InitAndLoadChainstate(
             LogInfo("[snapshot] re-enabling NODE_NETWORK services");
             node.connman->AddLocalServices(NODE_NETWORK);
         }
+#ifndef BITCOIN_MINIMAL_NODE
         LogInfo("[snapshot] restarting indexes");
         // Drain the validation interface queue to ensure that the old indexes
         // don't have any pending work.
@@ -1456,6 +1494,7 @@ static ChainstateLoadResult InitAndLoadChainstate(
                 LogWarning("[snapshot] Failed to restart index %s on snapshot chain", index->GetName());
             }
         }
+#endif
     };
     node::ChainstateLoadOptions options;
     options.mempool = Assert(node.mempool.get());
@@ -1589,12 +1628,14 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     /* Register RPC commands regardless of -server setting so they will be
      * available in the GUI RPC console even if external calls are disabled.
      */
+#ifndef BITCOIN_MINIMAL_NODE
     RegisterAllCoreRPCCommands(tableRPC);
     for (const auto& client : node.chain_clients) {
         client->registerRpcs();
     }
 #ifdef ENABLE_ZMQ
     RegisterZMQRPCCommands(tableRPC);
+#endif
 #endif
 
     // Check port numbers
@@ -1631,11 +1672,13 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
      * that the server is there and will be ready later).  Warmup mode will
      * be disabled when initialisation is finished.
      */
+#ifndef BITCOIN_MINIMAL_NODE
     if (args.GetBoolArg("-server", false)) {
         uiInterface.InitMessage.connect(SetRPCWarmupStatus);
         if (!AppInitServers(node))
             return InitError(_("Unable to start HTTP server. See debug log for details."));
     }
+#endif
 
     // ********************************************************* Step 5: verify wallet database integrity
     for (const auto& client : node.chain_clients) {
@@ -1951,6 +1994,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     ChainstateManager& chainman = *Assert(node.chainman);
 
+#ifndef BITCOIN_MINIMAL_NODE
     assert(!node.fee_estimator_man);
     // Don't initialize fee estimation with old data if we don't relay transactions,
     // as they would never get updated.
@@ -1960,13 +2004,14 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             return InitError(strprintf(_("acceptstalefeeestimates is not supported on %s chain."), chainparams.GetChainTypeString()));
         }
         MaybeMigrateLegacyFeeEstimates(args);
-        node.fee_estimator_man = std::make_unique<FeeRateEstimatorManager>(BlockPolicyFeeEstPath(args), read_stale_estimates, MempoolPolicyEstimatorPath(args), *Assert(node.mempool), chainman);
+        node.fee_estimator_man = std::make_shared<FeeRateEstimatorManager>(BlockPolicyFeeEstPath(args), read_stale_estimates, MempoolPolicyEstimatorPath(args), *Assert(node.mempool), chainman);
 
         // Flush estimates to disk periodically
         FeeRateEstimatorManager* fee_estimator_man = node.fee_estimator_man.get();
         scheduler.scheduleEvery([fee_estimator_man] { fee_estimator_man->IntervalFlush(); }, FEE_FLUSH_INTERVAL);
         validation_signals.RegisterValidationInterface(fee_estimator_man);
     }
+#endif
 
     auto& kernel_notifications{*Assert(node.notifications)};
 
@@ -1980,6 +2025,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
                                      std::move(tx_validation_facade));
     validation_signals.RegisterValidationInterface(node.peerman.get());
 
+#ifndef BITCOIN_MINIMAL_NODE
     // ********************************************************* Step 8: start indexers
 
     if (args.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
@@ -2004,6 +2050,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
     // Init indexes
     for (auto index : node.indexes) if (!index->Init()) return false;
+#endif
 
     // ********************************************************* Step 9: load wallet
     for (const auto& client : node.chain_clients) {
@@ -2406,7 +2453,9 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     // cannot yet be called. Before we make it callable, we need to make sure
     // that the RPC's view of the best block is valid and consistent with
     // ChainstateManager's active tip.
+#ifndef BITCOIN_MINIMAL_NODE
     SetRPCWarmupFinished();
+#endif
 
     uiInterface.InitMessage(_("Done loading"));
 
@@ -2430,6 +2479,10 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 
 bool StartIndexBackgroundSync(NodeContext& node)
 {
+#ifdef BITCOIN_MINIMAL_NODE
+    (void)node;
+    return true;
+#else
     ChainstateManager& chainman = *Assert(node.chainman);
     const Chainstate& chainstate = WITH_LOCK(::cs_main, return chainman.ValidatedChainstate());
     const CChain& index_chain = chainstate.m_chain;
@@ -2503,4 +2556,5 @@ bool StartIndexBackgroundSync(NodeContext& node)
     // Start threads
     for (auto index : node.indexes) if (!index->StartBackgroundSync()) return false;
     return true;
+#endif
 }

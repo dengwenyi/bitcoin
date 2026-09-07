@@ -3303,6 +3303,7 @@ bool PeerManagerImpl::ProcessOrphanTx(Peer& peer)
     return false;
 }
 
+#ifndef BITCOIN_MINIMAL_NODE
 bool PeerManagerImpl::PrepareBlockFilterRequest(CNode& node, Peer& peer,
                                                 BlockFilterType filter_type, uint32_t start_height,
                                                 const uint256& stop_hash, uint32_t max_height_diff,
@@ -3464,6 +3465,36 @@ void PeerManagerImpl::ProcessGetCFCheckPt(CNode& node, Peer& peer, DataStream& v
               stop_index->GetBlockHash(),
               headers);
 }
+#else
+bool PeerManagerImpl::PrepareBlockFilterRequest(CNode& node, Peer& peer,
+                                                BlockFilterType, uint32_t,
+                                                const uint256&, uint32_t,
+                                                const CBlockIndex*&,
+                                                BlockFilterIndex*&)
+{
+    LogDebug(BCLog::NET, "compact filter service is unavailable, %s", node.DisconnectMsg());
+    node.fDisconnect = true;
+    (void)peer;
+    return false;
+}
+
+void PeerManagerImpl::ProcessGetCFilters(CNode& node, Peer& peer, DataStream&)
+{
+    const CBlockIndex* stop_index{nullptr};
+    BlockFilterIndex* filter_index{nullptr};
+    PrepareBlockFilterRequest(node, peer, BlockFilterType::BASIC, 0, {}, 0, stop_index, filter_index);
+}
+
+void PeerManagerImpl::ProcessGetCFHeaders(CNode& node, Peer& peer, DataStream& stream)
+{
+    ProcessGetCFilters(node, peer, stream);
+}
+
+void PeerManagerImpl::ProcessGetCFCheckPt(CNode& node, Peer& peer, DataStream& stream)
+{
+    ProcessGetCFilters(node, peer, stream);
+}
+#endif
 
 void PeerManagerImpl::ProcessBlock(CNode& node, const std::shared_ptr<const CBlock>& block, bool force_processing, bool min_pow_checked)
 {

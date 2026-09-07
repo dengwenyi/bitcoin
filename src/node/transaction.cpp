@@ -145,6 +145,7 @@ CTransactionRef GetTransaction(const CBlockIndex* const block_index, const CTxMe
         CTransactionRef ptx = mempool->get(hash);
         if (ptx) return ptx;
     }
+#ifndef BITCOIN_MINIMAL_NODE
     if (g_txindex) {
         if (auto result{g_txindex->FindTx(hash)}) {
             if (!block_index || block_index->GetBlockHash() == result->block_hash) {
@@ -156,6 +157,7 @@ CTransactionRef GetTransaction(const CBlockIndex* const block_index, const CTxMe
             }
         }
     }
+#endif
     if (block_index) {
         CBlock block;
         if (blockman.ReadBlock(block, *block_index)) {

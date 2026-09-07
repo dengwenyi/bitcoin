@@ -255,13 +255,14 @@ target_link_libraries(btc_net_transport
 # Transitional transaction-relay boundary. Validation and net_processing still
 # consume these concrete types directly; keeping the implementation together in
 # one object target makes that dependency visible without changing behavior.
-add_library(btc_tx_relay OBJECT EXCLUDE_FROM_ALL
+set(BTC_TX_RELAY_SOURCES
   node/peer_tx_relay.cpp
   node/transaction.cpp
   node/txdownloadman_impl.cpp
   node/txorphanage.cpp
   node/txreconciliation.cpp
   policy/ephemeral_policy.cpp
+  policy/fees/fee_filter.cpp
   policy/packages.cpp
   policy/rbf.cpp
   policy/truc_policy.cpp
@@ -270,6 +271,7 @@ add_library(btc_tx_relay OBJECT EXCLUDE_FROM_ALL
   txmempool.cpp
   txrequest.cpp
 )
+add_library(btc_tx_relay OBJECT EXCLUDE_FROM_ALL ${BTC_TX_RELAY_SOURCES})
 target_link_libraries(btc_tx_relay
   PRIVATE
     core_interface
@@ -286,7 +288,7 @@ target_link_libraries(btc_tx_relay
 # Transitional peer-protocol boundary. NetEventsInterface, PeerManager, address
 # management, and peer-selection policy remain behavior-compatible while their
 # concrete implementation is moved behind one build target.
-add_library(btc_peer_protocol OBJECT EXCLUDE_FROM_ALL
+set(BTC_PEER_PROTOCOL_SOURCES
   addrdb.cpp
   addrman.cpp
   banman.cpp
@@ -302,6 +304,7 @@ add_library(btc_peer_protocol OBJECT EXCLUDE_FROM_ALL
   node/peer_sync_state.cpp
   node/timeoffsets.cpp
 )
+add_library(btc_peer_protocol OBJECT EXCLUDE_FROM_ALL ${BTC_PEER_PROTOCOL_SOURCES})
 target_link_libraries(btc_peer_protocol
   PRIVATE
     core_interface
@@ -361,7 +364,7 @@ target_link_libraries(btc_chainstate
 # layers, but keeping the control path in its own object target lets the
 # minimal composition replace upper-level services without duplicating the
 # compatibility bitcoin_node archive.
-add_library(btc_node_control OBJECT EXCLUDE_FROM_ALL
+set(BTC_NODE_CONTROL_SOURCES
   init.cpp
   node/abort.cpp
   node/blockmanager_args.cpp
@@ -380,6 +383,7 @@ add_library(btc_node_control OBJECT EXCLUDE_FROM_ALL
   noui.cpp
   policy/settings.cpp
 )
+add_library(btc_node_control OBJECT EXCLUDE_FROM_ALL ${BTC_NODE_CONTROL_SOURCES})
 target_link_libraries(btc_node_control
   PRIVATE
     core_interface
@@ -419,6 +423,58 @@ target_link_libraries(bitcoin_node
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
 )
 
+if(BUILD_MINIMAL_DAEMON)
+  # Compile the control, peer, and transaction-relay callers with their
+  # optional-service branches disabled. The compatibility targets above retain
+  # the full behavior and provide the comparison baseline.
+  set(BTC_NODE_CONTROL_MIN_SOURCES ${BTC_NODE_CONTROL_SOURCES})
+  list(REMOVE_ITEM BTC_NODE_CONTROL_MIN_SOURCES node/interfaces.cpp)
+  add_library(btc_node_control_min OBJECT EXCLUDE_FROM_ALL ${BTC_NODE_CONTROL_MIN_SOURCES})
+  target_compile_definitions(btc_node_control_min PRIVATE BITCOIN_MINIMAL_NODE=1)
+  target_link_libraries(btc_node_control_min PRIVATE
+    core_interface bitcoin_common bitcoin_util
+    $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
+    leveldb minisketch univalue
+    $<TARGET_NAME_IF_EXISTS:Boost::headers>
+    $<TARGET_NAME_IF_EXISTS:USDT::headers>
+  )
+
+  add_library(btc_peer_protocol_min OBJECT EXCLUDE_FROM_ALL ${BTC_PEER_PROTOCOL_SOURCES})
+  target_compile_definitions(btc_peer_protocol_min PRIVATE BITCOIN_MINIMAL_NODE=1)
+  target_link_libraries(btc_peer_protocol_min PRIVATE
+    core_interface bitcoin_common bitcoin_util
+    $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
+    leveldb minisketch univalue
+    $<TARGET_NAME_IF_EXISTS:Boost::headers>
+    $<TARGET_NAME_IF_EXISTS:USDT::headers>
+  )
+
+  add_library(btc_tx_relay_min OBJECT EXCLUDE_FROM_ALL ${BTC_TX_RELAY_SOURCES})
+  target_compile_definitions(btc_tx_relay_min PRIVATE BITCOIN_MINIMAL_NODE=1)
+  target_link_libraries(btc_tx_relay_min PRIVATE
+    core_interface bitcoin_common bitcoin_util
+    $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
+    leveldb minisketch univalue
+    $<TARGET_NAME_IF_EXISTS:Boost::headers>
+    $<TARGET_NAME_IF_EXISTS:USDT::headers>
+  )
+
+  add_library(bitcoin_node_min STATIC EXCLUDE_FROM_ALL dummywallet.cpp)
+  add_dependencies(bitcoin_node_min
+    btc_chainstate btc_net_transport btc_node_control_min
+    btc_peer_protocol_min btc_tx_relay_min
+  )
+  target_link_libraries(bitcoin_node_min PRIVATE
+    btc_chainstate btc_net_transport btc_node_control_min
+    btc_peer_protocol_min btc_tx_relay_min
+    core_interface bitcoin_common bitcoin_util
+    $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
+    leveldb minisketch univalue
+    $<TARGET_NAME_IF_EXISTS:Boost::headers>
+    $<TARGET_NAME_IF_EXISTS:USDT::headers>
+  )
+endif()
+
 # Keep lower layers from acquiring declared links back to higher layers. These
 # checks intentionally cover target-level dependencies; source-level coupling is
 # removed incrementally by the facade and channel stages.
@@ -457,9 +513,17 @@ assert_target_does_not_link(btc_tx_relay
 assert_target_does_not_link(btc_peer_protocol
   btc_chainstate btc_node_optional btc_tx_relay
 )
+if(TARGET bitcoin_node_min)
+  assert_target_does_not_link(bitcoin_node_min
+    bitcoin_node btc_node_control btc_node_optional btc_peer_protocol btc_tx_relay
+  )
+endif()
 
 if(WITH_EMBEDDED_ASMAP)
   target_compile_definitions(btc_node_control PRIVATE ENABLE_EMBEDDED_ASMAP=1)
+  if(TARGET btc_node_control_min)
+    target_compile_definitions(btc_node_control_min PRIVATE ENABLE_EMBEDDED_ASMAP=1)
+  endif()
   target_compile_definitions(btc_node_optional PRIVATE ENABLE_EMBEDDED_ASMAP=1)
   include(TargetDataSources)
   # Both rpc/net.cpp in btc_node_optional and init.cpp in btc_node_control include
@@ -508,10 +572,10 @@ if(BUILD_MINIMAL_DAEMON)
     init/bitcoind.cpp
   )
   add_windows_application_manifest(bitcoind_min)
+  target_compile_definitions(bitcoind_min PRIVATE BITCOIN_MINIMAL_NODE=1)
   target_link_libraries(bitcoind_min
     core_interface
-    bitcoin_node
-    $<TARGET_NAME_IF_EXISTS:bitcoin_wallet>
+    bitcoin_node_min
   )
 endif()
 if(ENABLE_IPC AND BUILD_DAEMON)

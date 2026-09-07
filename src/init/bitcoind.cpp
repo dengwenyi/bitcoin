@@ -19,7 +19,11 @@ using node::NodeContext;
 
 namespace init {
 namespace {
+#ifdef BITCOIN_MINIMAL_NODE
+const char* EXE_NAME = "bitcoind_min";
+#else
 const char* EXE_NAME = "bitcoind";
+#endif
 
 class BitcoindInit : public interfaces::Init
 {
@@ -29,9 +33,30 @@ public:
         InitContext(m_node);
         m_node.init = this;
     }
-    std::unique_ptr<interfaces::Node> makeNode() override { return interfaces::MakeNode(m_node); }
-    std::unique_ptr<interfaces::Chain> makeChain() override { return interfaces::MakeChain(m_node); }
-    std::unique_ptr<interfaces::Mining> makeMining() override { return interfaces::MakeMining(m_node); }
+    std::unique_ptr<interfaces::Node> makeNode() override
+    {
+#ifdef BITCOIN_MINIMAL_NODE
+        return {};
+#else
+        return interfaces::MakeNode(m_node);
+#endif
+    }
+    std::unique_ptr<interfaces::Chain> makeChain() override
+    {
+#ifdef BITCOIN_MINIMAL_NODE
+        return {};
+#else
+        return interfaces::MakeChain(m_node);
+#endif
+    }
+    std::unique_ptr<interfaces::Mining> makeMining() override
+    {
+#ifdef BITCOIN_MINIMAL_NODE
+        return {};
+#else
+        return interfaces::MakeMining(m_node);
+#endif
+    }
     std::unique_ptr<interfaces::WalletLoader> makeWalletLoader(interfaces::Chain& chain) override
     {
         return MakeWalletLoader(chain, *Assert(m_node.args));

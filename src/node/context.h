@@ -70,7 +70,9 @@ struct NodeContext {
     std::unique_ptr<CConnman> connman;
     std::unique_ptr<CTxMemPool> mempool;
     std::unique_ptr<const NetGroupManager> netgroupman;
-    std::unique_ptr<FeeRateEstimatorManager> fee_estimator_man;
+    // Shared ownership keeps destruction of this optional service out of the
+    // core NodeContext destructor used by the minimal daemon.
+    std::shared_ptr<FeeRateEstimatorManager> fee_estimator_man;
     std::unique_ptr<PeerManager> peerman;
     std::unique_ptr<TorController> tor_controller;
     std::unique_ptr<ChainstateManager> chainman;
@@ -82,7 +84,7 @@ struct NodeContext {
     std::vector<std::unique_ptr<interfaces::ChainClient>> chain_clients;
     //! Reference to chain client that should used to load or create wallets
     //! opened by the gui.
-    std::unique_ptr<interfaces::Mining> mining;
+    std::shared_ptr<interfaces::Mining> mining;
     //! Mining options used to create block templates. This value member is an
     //! exception to the dependency guidance above because BlockCreateOptions is
     //! a minimal dependency. It could be moved to the BlockTemplateCache
