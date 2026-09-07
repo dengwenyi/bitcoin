@@ -357,9 +357,11 @@ target_link_libraries(btc_chainstate
     $<TARGET_NAME_IF_EXISTS:USDT::headers>
 )
 
-# P2P, validation, chainstate, and compatibility composition used by `bitcoind`
-# and `bitcoin-qt` executables.
-add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
+# Transitional node lifecycle boundary. It still coordinates all concrete
+# layers, but keeping the control path in its own object target lets the
+# minimal composition replace upper-level services without duplicating the
+# compatibility bitcoin_node archive.
+add_library(btc_node_control OBJECT EXCLUDE_FROM_ALL
   init.cpp
   node/abort.cpp
   node/blockmanager_args.cpp
@@ -377,14 +379,32 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   node/warnings.cpp
   noui.cpp
   policy/settings.cpp
+)
+target_link_libraries(btc_node_control
+  PRIVATE
+    core_interface
+    bitcoin_common
+    bitcoin_util
+    $<TARGET_NAME_IF_EXISTS:bitcoin_zmq>
+    leveldb
+    minisketch
+    univalue
+    $<TARGET_NAME_IF_EXISTS:Boost::headers>
+    $<TARGET_NAME_IF_EXISTS:USDT::headers>
+)
+
+# P2P, validation, chainstate, and compatibility composition used by `bitcoind`
+# and `bitcoin-qt` executables.
+add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   $<$<TARGET_EXISTS:bitcoin_wallet>:wallet/init.cpp>
   $<$<NOT:$<TARGET_EXISTS:bitcoin_wallet>>:dummywallet.cpp>
 )
-add_dependencies(bitcoin_node btc_chainstate btc_net_transport btc_node_optional btc_peer_protocol btc_tx_relay)
+add_dependencies(bitcoin_node btc_chainstate btc_net_transport btc_node_control btc_node_optional btc_peer_protocol btc_tx_relay)
 target_link_libraries(bitcoin_node
   PRIVATE
     btc_chainstate
     btc_net_transport
+    btc_node_control
     btc_node_optional
     btc_peer_protocol
     btc_tx_relay
@@ -439,10 +459,10 @@ assert_target_does_not_link(btc_peer_protocol
 )
 
 if(WITH_EMBEDDED_ASMAP)
-  target_compile_definitions(bitcoin_node PRIVATE ENABLE_EMBEDDED_ASMAP=1)
+  target_compile_definitions(btc_node_control PRIVATE ENABLE_EMBEDDED_ASMAP=1)
   target_compile_definitions(btc_node_optional PRIVATE ENABLE_EMBEDDED_ASMAP=1)
   include(TargetDataSources)
-  # Both rpc/net.cpp in btc_node_optional and init.cpp in bitcoin_node include
+  # Both rpc/net.cpp in btc_node_optional and init.cpp in btc_node_control include
   # this generated header. bitcoin_node already depends on btc_node_optional,
   # so assigning generation to the first consumer gives both targets a valid
   # build-order dependency.
