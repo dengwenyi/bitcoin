@@ -73,6 +73,7 @@ $cleanEnvRunner = Join-Path $PSScriptRoot 'run-with-clean-windows-env.py'
     "-DVCPKG_MANIFEST_FEATURES=$manifestFeatures" `
     -DBUILD_BITCOIN_BIN=OFF `
     -DBUILD_DAEMON=ON `
+    -DBUILD_MINIMAL_DAEMON=ON `
     -DBUILD_GUI=OFF `
     -DBUILD_CLI=OFF `
     "-DBUILD_TESTS=$buildTestsValue" `

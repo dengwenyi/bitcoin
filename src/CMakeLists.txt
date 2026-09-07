@@ -477,6 +477,23 @@ if(BUILD_DAEMON)
   )
   install_binary_component(bitcoind HAS_MANPAGE)
 endif()
+
+# Transitional minimal composition root. It deliberately starts from the same
+# behavior as bitcoind; later slices remove upper-level service targets from
+# this executable while keeping bitcoind as the compatibility baseline.
+if(BUILD_MINIMAL_DAEMON)
+  add_executable(bitcoind_min
+    bitcoind.cpp
+    bitcoind-res.rc
+    init/bitcoind.cpp
+  )
+  add_windows_application_manifest(bitcoind_min)
+  target_link_libraries(bitcoind_min
+    core_interface
+    bitcoin_node
+    $<TARGET_NAME_IF_EXISTS:bitcoin_wallet>
+  )
+endif()
 if(ENABLE_IPC AND BUILD_DAEMON)
   add_executable(bitcoin-node
     bitcoind.cpp
